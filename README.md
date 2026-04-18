@@ -2,6 +2,8 @@
 
 Repositorio **independiente** centrado en radicación por bots (Playwright) y un panel web. El backend principal solo consume esta API por HTTP.
 
+Pasos de despliegue Railway + Vercel: [docs/DEPLOY.md](docs/DEPLOY.md).
+
 ## Por qué Vercel + Railway
 
 - **Vercel** encaja con el **panel estático** (`apps/web`, Vite). CDN, HTTPS y despliegues simples.
@@ -12,7 +14,7 @@ No conviene ejecutar el bot Playwright dentro de **Vercel Functions** (límites 
 ## Estructura
 
 ```
-radicacion-service/
+radicacion/
 ├── README.md
 ├── docs/
 │   └── INTEGRATION.md      # Contrato para tu backend principal
@@ -56,11 +58,17 @@ npm run dev
 
 `vite.config.js` hace proxy de `/health` y `/api` al `localhost:8000`, así no hace falta `VITE_RADICACION_API_URL` en local.
 
-## Vercel
+## Vercel (panel)
 
-1. Nuevo proyecto → importar este repositorio.
-2. **Root Directory:** `apps/web`.
-3. Variables de entorno de build: `VITE_RADICACION_API_URL` = URL pública de la API en Railway (sin `/` final).
+Guía detallada: [docs/DEPLOY.md](docs/DEPLOY.md).
+
+Resumen:
+
+1. Nuevo proyecto en Vercel → importar **el mismo repo**.
+2. **Opción A (recomendada):** deja el proyecto en la **raíz del repo**; Vercel usa el `vercel.json` de la raíz para construir `apps/web`.
+3. **Opción B:** **Root Directory** = `apps/web` (usa el `vercel.json` de esa carpeta).
+4. Variable **obligatoria** en Vercel: `VITE_RADICACION_API_URL` = URL pública de Railway (sin `/` final). Aplica a Production y Preview.
+5. En Railway, actualiza `CORS_ORIGINS` con la URL **https** de tu proyecto Vercel (ver [docs/DEPLOY.md](docs/DEPLOY.md)).
 
 ## Railway (API)
 

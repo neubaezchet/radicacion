@@ -215,7 +215,21 @@ function pollJob(jobId) {
   }, 3000);
 }
 
+function warnMissingApiUrl() {
+  if (import.meta.env.DEV) return;
+  const base = (import.meta.env.VITE_RADICACION_API_URL || '').trim();
+  if (base) return;
+  const banner = document.createElement('div');
+  banner.setAttribute('role', 'alert');
+  banner.style.cssText =
+    'background:#3d1a1a;color:#fecaca;padding:10px 16px;text-align:center;font-family:IBM Plex Mono,monospace;font-size:12px;border-bottom:1px solid #f87171';
+  banner.textContent =
+    'Falta VITE_RADICACION_API_URL en Vercel (Settings → Environment Variables). Redeploy después de guardar.';
+  document.body.insertBefore(banner, document.body.firstChild);
+}
+
 function init() {
+  warnMissingApiUrl();
   pingAPI();
   setInterval(pingAPI, 15000);
 
