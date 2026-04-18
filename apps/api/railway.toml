@@ -1,0 +1,10 @@
+# Railway: establece "Root Directory" a `apps/api` o la ruta equivalente en tu repo.
+# Builder: Dockerfile (recomendado para Playwright).
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+restartPolicyType = "ON_FAILURE"

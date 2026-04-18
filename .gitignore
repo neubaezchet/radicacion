@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.local
+*.egg-info/
+dist/
+build/
+
+# Node / Vite
+node_modules/
+apps/web/dist/
+*.local
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Runtime uploads / evidencias
+/tmp/
+uploads/
+evidencias/
