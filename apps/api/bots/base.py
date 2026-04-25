@@ -23,7 +23,7 @@ class DatosRadicacion(BaseModel):
     credenciales: CredencialesEmpleador
 
     # Datos del trabajador
-    documento_trabajador: Optional[str] = None   # Cédula del trabajador (para el PDF)
+    documento_trabajador: Optional[str] = None
     fecha_inicio_incapacidad: Optional[str] = None  # Formato: "DD MM YYYY" ej: "18 04 2026"
 
     # Número de incapacidad (dos campos como en el portal)
@@ -34,8 +34,8 @@ class DatosRadicacion(BaseModel):
     transcripcion: bool = False                  # False=digitalizada, True=transcripción
 
     # Archivos para transcripción
-    pdf_incapacidad: Optional[str] = None        # Ruta local al PDF de la incapacidad
-    soportes_adicionales: Optional[list[str]] = None  # Rutas a soportes adicionales
+    pdf_incapacidad: Optional[str] = None
+    soportes_adicionales: Optional[list[str]] = None
 
 
 class ResultadoRadicacion(BaseModel):
@@ -43,4 +43,49 @@ class ResultadoRadicacion(BaseModel):
     exitoso: bool
     numero_radicado: Optional[str] = None
     mensaje: str
-    pdf_path: Optional[str] = None   # Ruta al PDF de confirmación guardado en el servidor
+    pdf_path: Optional[str] = None
+
+
+# Alias para compatibilidad con el __init__.py del proyecto
+DatosIncapacidad = DatosRadicacion
+
+# Tipos de documento válidos en el portal SURA
+TIPOS_DOCUMENTO_VALIDOS = [
+    "C",   # CEDULA
+    "E",   # CEDULA EXTRANJERIA
+    "D",   # DIPLOMATICO
+    "X",   # DOC.IDENT. DE EXTRANJEROS
+    "F",   # IDENT. FISCAL PARA EXT.
+    "A",   # NIT
+    "N",   # NIT PERSONAS NATURALES
+    "U",   # NUIP
+    "P",   # PASAPORTE
+    "R",   # REGISTRO CIVIL
+    "T",   # TARJ.IDENTIDAD
+    "B",   # CERTIFICADO NACIDO VIVO
+    "O",   # PASAPORTE ONU
+    "Q",   # PERMISO ESPECIAL PERMANENCIA
+    "S",   # SALVOCONDUCTO DE PERMANENCIA
+    "G",   # PERMISO ESPECIAL FORMACN PEPFF
+    "M",   # PERMISO POR PROTECCION TEMPORL
+]
+
+TIPOS_DOCUMENTO_LABELS = {
+    "C": "CEDULA",
+    "E": "CEDULA EXTRANJERIA",
+    "D": "DIPLOMATICO",
+    "X": "DOC.IDENT. DE EXTRANJEROS",
+    "F": "IDENT. FISCAL PARA EXT.",
+    "A": "NIT",
+    "N": "NIT PERSONAS NATURALES",
+    "U": "NUIP",
+    "P": "PASAPORTE",
+    "R": "REGISTRO CIVIL",
+    "T": "TARJ.IDENTIDAD",
+    "B": "CERTIFICADO NACIDO VIVO",
+    "O": "PASAPORTE ONU",
+    "Q": "PERMISO ESPECIAL PERMANENCIA",
+    "S": "SALVOCONDUCTO DE PERMANENCIA",
+    "G": "PERMISO ESPECIAL FORMACN PEPFF",
+    "M": "PERMISO POR PROTECCION TEMPORL",
+}

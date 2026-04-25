@@ -16,9 +16,10 @@ import uvicorn
 
 from bots import (
     CredencialesEmpleador,
-    DatosIncapacidad,
+    DatosRadicacion,
     ResultadoRadicacion,
     TIPOS_DOCUMENTO_VALIDOS,
+    TIPOS_DOCUMENTO_LABELS,
     radicar_en_sura,
 )
 from config import Settings, get_settings
@@ -26,7 +27,7 @@ from jobs import radicaciones
 
 app = FastAPI(
     title="Radicación EPS",
-    version="2.0.0",
+    version="2.1.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
@@ -66,9 +67,9 @@ def require_service_key(
 async def root() -> dict[str, Any]:
     return {
         "service": "radicacion-api",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "docs": "/docs",
-        "tipos_documento": TIPOS_DOCUMENTO_VALIDOS,
+        "tipos_documento": TIPOS_DOCUMENTO_LABELS,
     }
 
 
@@ -78,77 +79,89 @@ async def health() -> dict[str, str]:
 
 
 @app.get("/tipos-documento")
-async def tipos_documento() -> dict[str, list[str]]:
-    """Lista los tipos de documento válidos para el portal SURA."""
-    return {"tipos_documento": TIPOS_DOCUMENTO_VALIDOS}
+async def tipos_documento() -> dict[str, Any]:
+    """
+    Lista los tipos de documento válidos para el portal SURA.
+    Devuelve tanto el value del DOM (para enviar al bot) como el label legible.
+    """
+    return {"tipos_documento": TIPOS_DOCUMENTO_LABELS}
 
 
 # ── Radicación SURA ───────────────────────────────────────────────────────
 
 @app.post("/api/radicar/sura")
-async def radicar_sura(
+async def radicar_sura_endpoint(
     background_tasks: BackgroundTasks,
     _: Annotated[None, Depends(require_service_key)],
-    # — Credenciales empleador (multi-tenant) —
-    tipo_documento_empleador: str = Form(..., description="Tipo de documento del empleador según portal SURA"),
-    numero_documento_empleador: str = Form(..., description="NIT, cédula u otro número"),
-    clave_empleador: str = Form(..., description="Clave del portal (teclado virtual)"),
+    # — Credenciales empleador —
+    tipo_documento_empleador: str = Form(
+        ...,
+        description="Value del select del portal: 'C'=CEDULA, 'A'=NIT, etc. Ver /tipos-documento"
+    ),
+    numero_documento_empleador: str = Form(...),
+    clave_empleador: str = Form(..., description="PIN numérico del portal"),
     # — Trabajador —
-    tipo_documento_trabajador: str = Form("CEDULA"),
     cedula_trabajador: str = Form(...),
+    fecha_inicio_incapacidad: Optional[str] = Form(
+        None,
+        description="Formato: 'DD MM YYYY', ej: '18 04 2026'"
+    ),
     # — Incapacidad —
-    prefijo_incapacidad: str = Form(..., description="Primer recuadro del número (ej: 0)"),
-    numero_incapacidad: str = Form(..., description="Segundo recuadro — dígitos restantes"),
-    fecha_inicio: str = Form(..., description="DD/MM/YYYY"),
-    fecha_fin: str = Form(..., description="DD/MM/YYYY"),
-    dias_incapacidad: int = Form(...),
-    es_transcripcion: bool = Form(False, description="True si la incapacidad es externa (requiere PDF)"),
+    prefijo_incapacidad: str = Form("0", description="Primer recuadro del número (ej: 0)"),
+    numero_incapacidad: str = Form(..., description="Segundo recuadro — dígitos principales"),
+    # — Flujo —
+    transcripcion: bool = Form(False, description="True si la incapacidad es externa (requiere PDF)"),
     # — Documentos opcionales —
     pdf_incapacidad: Optional[UploadFile] = File(None),
-    pdf_historia_clinica: Optional[UploadFile] = File(None),
+    soportes_adicionales: Optional[list[UploadFile]] = File(None),
 ) -> dict[str, Any]:
 
     if tipo_documento_empleador not in TIPOS_DOCUMENTO_VALIDOS:
         raise HTTPException(
             status_code=422,
-            detail=f"tipo_documento_empleador '{tipo_documento_empleador}' no válido. "
-                   f"Opciones: {TIPOS_DOCUMENTO_VALIDOS}",
+            detail=(
+                f"tipo_documento_empleador '{tipo_documento_empleador}' no válido. "
+                f"Valores aceptados: {TIPOS_DOCUMENTO_VALIDOS}. "
+                f"Ver /tipos-documento para la lista completa con labels."
+            ),
         )
 
-    if es_transcripcion and not pdf_incapacidad:
+    if transcripcion and not pdf_incapacidad:
         raise HTTPException(
             status_code=422,
-            detail="Para transcripciones se requiere pdf_incapacidad.",
+            detail="Para transcripciones se requiere adjuntar pdf_incapacidad.",
         )
 
     job_id = str(uuid.uuid4())
 
-    pdf_path: Optional[Path] = None
+    # Guardar archivos subidos en /tmp/uploads
+    pdf_path: Optional[str] = None
     if pdf_incapacidad and pdf_incapacidad.filename:
-        pdf_path = UPLOADS_DIR / f"{job_id}_incap.pdf"
-        pdf_path.write_bytes(await pdf_incapacidad.read())
+        p = UPLOADS_DIR / f"{job_id}_incap.pdf"
+        p.write_bytes(await pdf_incapacidad.read())
+        pdf_path = str(p)
 
-    historia_path: Optional[Path] = None
-    if pdf_historia_clinica and pdf_historia_clinica.filename:
-        historia_path = UPLOADS_DIR / f"{job_id}_historia.pdf"
-        historia_path.write_bytes(await pdf_historia_clinica.read())
+    soportes_paths: list[str] = []
+    if soportes_adicionales:
+        for i, soporte in enumerate(soportes_adicionales):
+            if soporte and soporte.filename:
+                sp = UPLOADS_DIR / f"{job_id}_soporte_{i}.pdf"
+                sp.write_bytes(await soporte.read())
+                soportes_paths.append(str(sp))
 
-    datos = DatosIncapacidad(
+    datos = DatosRadicacion(
         credenciales=CredencialesEmpleador(
             tipo_documento=tipo_documento_empleador,
             numero_documento=numero_documento_empleador,
             clave=clave_empleador,
         ),
-        tipo_documento_trabajador=tipo_documento_trabajador,
-        cedula_trabajador=cedula_trabajador,
+        documento_trabajador=cedula_trabajador,
+        fecha_inicio_incapacidad=fecha_inicio_incapacidad,
         prefijo_incapacidad=prefijo_incapacidad,
         numero_incapacidad=numero_incapacidad,
-        fecha_inicio=fecha_inicio,
-        fecha_fin=fecha_fin,
-        dias_incapacidad=dias_incapacidad,
-        es_transcripcion=es_transcripcion,
+        transcripcion=transcripcion,
         pdf_incapacidad=pdf_path,
-        pdf_historia_clinica=historia_path,
+        soportes_adicionales=soportes_paths if soportes_paths else None,
     )
 
     radicaciones[job_id] = {
@@ -157,7 +170,7 @@ async def radicar_sura(
         "status": "procesando",
         "cedula_trabajador": cedula_trabajador,
         "numero_incapacidad": f"{prefijo_incapacidad}-{numero_incapacidad}",
-        "es_transcripcion": es_transcripcion,
+        "transcripcion": transcripcion,
     }
     background_tasks.add_task(_ejecutar_radicacion, job_id, datos)
 
@@ -180,14 +193,15 @@ async def listar_radicaciones(
 
 # ── Worker ────────────────────────────────────────────────────────────────
 
-async def _ejecutar_radicacion(job_id: str, datos: DatosIncapacidad) -> None:
+async def _ejecutar_radicacion(job_id: str, datos: DatosRadicacion) -> None:
     try:
-        resultado: ResultadoRadicacion = await radicar_en_sura(datos, headless=True)
+        resultado: ResultadoRadicacion = await radicar_en_sura(datos)
         radicaciones[job_id] = {
             **radicaciones[job_id],
             "status": "exitoso" if resultado.exitoso else "fallido",
             "numero_radicado": resultado.numero_radicado,
             "mensaje": resultado.mensaje,
+            "pdf_path": resultado.pdf_path,
         }
     except Exception as e:
         radicaciones[job_id] = {
@@ -196,12 +210,16 @@ async def _ejecutar_radicacion(job_id: str, datos: DatosIncapacidad) -> None:
             "mensaje": str(e),
         }
     finally:
-        # Limpiar archivos temporales
-        for attr in ("pdf_incapacidad", "pdf_historia_clinica"):
-            p: Path | None = getattr(datos, attr, None)
-            if p and p.exists():
+        # Limpiar archivos temporales subidos
+        if datos.pdf_incapacidad:
+            try:
+                Path(datos.pdf_incapacidad).unlink(missing_ok=True)
+            except Exception:
+                pass
+        if datos.soportes_adicionales:
+            for sp in datos.soportes_adicionales:
                 try:
-                    p.unlink()
+                    Path(sp).unlink(missing_ok=True)
                 except Exception:
                     pass
 

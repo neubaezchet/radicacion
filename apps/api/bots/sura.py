@@ -2,7 +2,7 @@
 Bot SURA — selectores 100% confirmados por grabación real con playwright codegen.
 
 LOGIN (tab empleadores #tabInternet):
-  #ctl00_ContentMain_suraType     → select tipo documento
+  #ctl00_ContentMain_suraType     → select tipo documento (value: "C", "A", etc.)
   #suraName                       → número identificación empleador
   #suraPassword                   → PIN (activa teclado virtual jQuery)
   button[name="NN"]               → dígito PIN (NN = código ASCII: 0=48..9=57)
@@ -15,12 +15,13 @@ POST-LOGIN:
   link "Radicar Incapacidades"    → módulo de radicación
 
 FORMULARIO (iframe[name="index1"] > #contenido):
-  #radicarIncapacidad:tipoIncapacidad    → prefijo de la incapacidad (ej: "0")
-  #radicarIncapacidad:numeroIncapacidad  → número de incapacidad (ej: "43445280")
-  link "Radicar"                         → confirmar radicación
+  [id="radicarIncapacidad:tipoIncapacidad"]    → prefijo de la incapacidad (ej: "0")
+  [id="radicarIncapacidad:numeroIncapacidad"]  → número de incapacidad (ej: "43445280")
+  link "Radicar"                               → confirmar radicación
 
 PDF de confirmación:
-  Se guarda como screenshot PDF con nombre: {cedula_trabajador} {DD MM YYYY}.pdf
+  Se guarda con nombre: {cedula_trabajador} {DD MM YYYY}.pdf
+  Ej: 79718363 18 04 2026.pdf
 """
 
 import logging
@@ -31,7 +32,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
-from base import DatosRadicacion, ResultadoRadicacion
+from bots.base import DatosRadicacion, ResultadoRadicacion
 
 log = logging.getLogger(__name__)
 
@@ -58,13 +59,14 @@ ASCII_DIGITO = {str(d): str(48 + d) for d in range(10)}
 def _digitar_pin(page, pin: str) -> None:
     """
     Abre el teclado virtual haciendo clic en #suraPassword,
-    pulsa cada dígito por button[name="ASCII"] y acepta con ✔.
+    borra cualquier valor previo, pulsa cada dígito por
+    button[name="ASCII"] y acepta con el botón ✔.
     """
     log.info("[SURA] Abriendo teclado virtual")
     page.locator("#suraPassword").click()
     page.wait_for_timeout(800)
 
-    # Borrar valor previo por si acaso
+    # Borrar valor previo por si hay algo del intento anterior
     try:
         page.locator('button[name="bksp"]').dblclick(timeout=2000)
         page.wait_for_timeout(200)
@@ -73,7 +75,7 @@ def _digitar_pin(page, pin: str) -> None:
 
     for i, digito in enumerate(pin):
         page.locator(f'button[name="{ASCII_DIGITO[digito]}"]').click()
-        log.info("[SURA]   PIN %d/%d", i + 1, len(pin))
+        log.info("[SURA]   PIN dígito %d/%d", i + 1, len(pin))
         page.wait_for_timeout(150)
 
     page.get_by_role("button", name="✔").click()
@@ -88,20 +90,23 @@ def _digitar_pin(page, pin: str) -> None:
 def _login(page, datos: DatosRadicacion) -> None:
     cred = datos.credenciales
 
-    log.info("[SURA] PASO 2: tipo_doc=%s", cred.tipo_documento)
+    log.info("[SURA] PASO 2: Seleccionando tipo de identificación: %s", cred.tipo_documento)
     page.locator("#ctl00_ContentMain_suraType").select_option(cred.tipo_documento)
+    log.info("[SURA] PASO 2 OK")
 
-    log.info("[SURA] PASO 3: numero=%s", cred.numero_documento)
+    log.info("[SURA] PASO 3: Número de identificación")
     page.locator("#suraName").click()
     page.locator("#suraName").fill(cred.numero_documento)
+    log.info("[SURA] PASO 3 OK — num=%s", cred.numero_documento)
 
-    log.info("[SURA] PASO 4: PIN")
+    log.info("[SURA] PASO 4: Digitando PIN")
     _digitar_pin(page, cred.clave)
+    log.info("[SURA] PASO 4 OK")
 
-    log.info("[SURA] PASO 5: Iniciar sesión")
+    log.info("[SURA] PASO 5: Iniciando sesión")
     page.get_by_role("button", name="Iniciar sesión").click()
     page.wait_for_load_state("networkidle", timeout=20000)
-    log.info("[SURA] Login OK — %s", page.url[:80])
+    log.info("[SURA] PASO 5 OK — URL post-login: %s", page.url[:80])
 
 
 # ─────────────────────────────────────────────────────────────
@@ -109,18 +114,20 @@ def _login(page, datos: DatosRadicacion) -> None:
 # ─────────────────────────────────────────────────────────────
 
 def _navegar_radicacion(page) -> None:
-    log.info("[SURA] PASO 6: Empleadores")
+    log.info("[SURA] PASO 6: Clic en Empleadores")
     page.get_by_role("link", name="Empleadores").click()
     page.wait_for_load_state("networkidle", timeout=15000)
+    log.info("[SURA] PASO 6 OK")
 
-    log.info("[SURA] PASO 7: Empresa")
+    log.info("[SURA] PASO 7: Seleccionando empresa (#SempTranEmpresa)")
     page.locator("#SempTranEmpresa").click()
     page.wait_for_load_state("networkidle", timeout=10000)
+    log.info("[SURA] PASO 7 OK")
 
-    log.info("[SURA] PASO 8: Radicar Incapacidades")
+    log.info("[SURA] PASO 8: Clic en Radicar Incapacidades")
     page.get_by_role("link", name="Radicar Incapacidades").click()
     page.wait_for_load_state("networkidle", timeout=15000)
-    log.info("[SURA] Formulario cargado")
+    log.info("[SURA] PASO 8 OK — Formulario cargado")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -144,24 +151,22 @@ def _frame(page):
 
 def _radicar_digitalizada(page, datos: DatosRadicacion) -> str:
     """
-    Flujo incapacidad digitalizada por SURA.
-    IDs confirmados del DOM real:
-      #radicarIncapacidad:tipoIncapacidad   → prefijo ("0")
-      #radicarIncapacidad:numeroIncapacidad → número
-      link "Radicar"                        → confirmar
+    Flujo incapacidad digitalizada (emitida por SURA).
+    IDs confirmados del DOM real por playwright codegen:
+      [id="radicarIncapacidad:tipoIncapacidad"]   → prefijo ("0")
+      [id="radicarIncapacidad:numeroIncapacidad"] → número principal
+      link "Radicar"                               → confirmar
     """
     log.info("[SURA] FLUJO: Digitalizada")
     f = _frame(page)
 
-    # Prefijo de incapacidad
     prefijo = datos.prefijo_incapacidad or "0"
-    log.info("[SURA] Prefijo: %s", prefijo)
+    log.info("[SURA] PASO 9: Prefijo incapacidad = %s", prefijo)
     campo_prefijo = f.locator('[id="radicarIncapacidad:tipoIncapacidad"]')
     campo_prefijo.click()
     campo_prefijo.fill(prefijo)
 
-    # Número de incapacidad
-    log.info("[SURA] Número: %s", datos.numero_incapacidad)
+    log.info("[SURA] PASO 10: Número incapacidad = %s", datos.numero_incapacidad)
     campo_num = f.locator('[id="radicarIncapacidad:numeroIncapacidad"]')
     campo_num.dblclick()
     campo_num.fill(datos.numero_incapacidad)
@@ -170,10 +175,10 @@ def _radicar_digitalizada(page, datos: DatosRadicacion) -> str:
     f.locator("html").click()
     page.wait_for_timeout(1000)
 
-    # Radicar
-    log.info("[SURA] Clic en Radicar")
+    log.info("[SURA] PASO 11: Clic en Radicar")
     f.get_by_role("link", name="Radicar").click()
     page.wait_for_load_state("networkidle", timeout=20000)
+    log.info("[SURA] PASO 11 OK")
 
     return _extraer_radicado(page, f)
 
@@ -185,16 +190,18 @@ def _radicar_digitalizada(page, datos: DatosRadicacion) -> str:
 def _radicar_transcripcion(page, datos: DatosRadicacion) -> str:
     """
     Flujo transcripción — incapacidad NO emitida por SURA.
-    TODO: grabar este flujo con codegen para confirmar IDs exactos.
+    TODO: grabar este flujo con playwright codegen para confirmar IDs exactos.
     """
     log.info("[SURA] FLUJO: Transcripción")
     f = _frame(page)
 
+    log.info("[SURA] Número incapacidad = %s", datos.numero_incapacidad)
     campo_num = f.locator('[id="radicarIncapacidad:numeroIncapacidad"]')
     campo_num.dblclick()
     campo_num.fill(datos.numero_incapacidad)
 
     if datos.pdf_incapacidad:
+        log.info("[SURA] Adjuntando PDF incapacidad: %s", datos.pdf_incapacidad)
         f.locator('input[type="file"]').nth(0).set_input_files(datos.pdf_incapacidad)
         page.wait_for_timeout(1000)
 
@@ -203,12 +210,14 @@ def _radicar_transcripcion(page, datos: DatosRadicacion) -> str:
             try:
                 f.locator('input[type="file"]').nth(i + 1).set_input_files(soporte)
                 page.wait_for_timeout(500)
+                log.info("[SURA] Soporte %d adjuntado", i + 1)
             except Exception:
                 log.warning("[SURA] Soporte %d no adjuntado", i + 1)
 
     f.locator("html").click()
     page.wait_for_timeout(800)
 
+    log.info("[SURA] Clic en Radicar (transcripción)")
     f.get_by_role("link", name="Radicar").click()
     page.wait_for_load_state("networkidle", timeout=30000)
 
@@ -220,18 +229,18 @@ def _radicar_transcripcion(page, datos: DatosRadicacion) -> str:
 # ─────────────────────────────────────────────────────────────
 
 def _extraer_radicado(page, frame) -> str:
-    log.info("[SURA] Buscando número de radicado...")
+    log.info("[SURA] Buscando número radicado en pantalla...")
     for fuente in [frame, page]:
         try:
             texto = fuente.locator("body").inner_text(timeout=5000)
             match = re.search(r"[Rr]adicado[:\s#Nº]*(\d+)", texto)
             if match:
                 radicado = match.group(1)
-                log.info("[SURA] Radicado: %s", radicado)
+                log.info("[SURA] ✓ Radicado encontrado: %s", radicado)
                 return radicado
         except Exception:
             continue
-    log.warning("[SURA] Radicado no encontrado — revisar pantalla")
+    log.warning("[SURA] Radicado no encontrado en pantalla — revisar screenshot")
     return "RADICADO_PENDIENTE_REVISION"
 
 
@@ -241,14 +250,13 @@ def _extraer_radicado(page, frame) -> str:
 
 def _guardar_pdf(page, datos: DatosRadicacion) -> str | None:
     """
-    Guarda screenshot de la pantalla de confirmación como PDF.
-    Nombre: {cedula_trabajador} {DD MM YYYY}.pdf
-    Ej: 1085043374 18 04 2026.pdf
+    Guarda la pantalla de confirmación como PDF.
+    Nombre del archivo: {cedula_trabajador} {DD MM YYYY}.pdf
+    Ejemplo: 79718363 18 04 2026.pdf
     """
     try:
         PDF_DIR.mkdir(parents=True, exist_ok=True)
 
-        # Fecha inicial de incapacidad o fecha actual como fallback
         fecha = datos.fecha_inicio_incapacidad or datetime.now().strftime("%d %m %Y")
         cedula = datos.documento_trabajador or "sin_cedula"
         nombre = f"{cedula} {fecha}.pdf"
@@ -259,8 +267,7 @@ def _guardar_pdf(page, datos: DatosRadicacion) -> str | None:
         return str(ruta)
 
     except Exception as ex:
-        log.warning("[SURA] No se pudo guardar PDF: %s", ex)
-        # Fallback: screenshot PNG
+        log.warning("[SURA] No se pudo guardar PDF: %s — intentando PNG", ex)
         try:
             ruta_png = PDF_DIR / f"{datos.documento_trabajador or 'error'}.png"
             page.screenshot(path=str(ruta_png), full_page=True)
@@ -284,12 +291,13 @@ def radicar_sura(datos: DatosRadicacion) -> ResultadoRadicacion:
             pdf_path=None,
         )
 
-    log.info("[SURA] === RADICACIÓN REAL ===")
-    log.info("[SURA] Empleador: tipo=%s num=%s",
-             datos.credenciales.tipo_documento, datos.credenciales.numero_documento)
-    log.info("[SURA] Trabajador=%s | Incap=%s-%s | Transcripcion=%s",
-             datos.documento_trabajador, datos.prefijo_incapacidad,
-             datos.numero_incapacidad, datos.transcripcion)
+    log.info("[SURA] === INICIO RADICACIÓN SURA ===")
+    log.info("[SURA] Empleador tipo=%s num=%s | CC trabajador=%s | Incap=%s-%s",
+             datos.credenciales.tipo_documento,
+             datos.credenciales.numero_documento,
+             datos.documento_trabajador,
+             datos.prefijo_incapacidad,
+             datos.numero_incapacidad)
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(
@@ -318,27 +326,22 @@ def radicar_sura(datos: DatosRadicacion) -> ResultadoRadicacion:
         page = context.new_page()
 
         try:
-            # PASO 1 — Portal
-            log.info("[SURA] PASO 1: Abriendo portal")
+            log.info("[SURA] PASO 1: Abriendo login SURA")
             page.goto(SURA_URL, wait_until="domcontentloaded", timeout=30000)
-            log.info("[SURA] PASO 1 OK — %s", page.title())
+            log.info("[SURA] PASO 1 OK — URL: %s | Title: %s",
+                     page.url[:80], page.title())
 
-            # Login
             _login(page, datos)
-
-            # Navegación
             _navegar_radicacion(page)
 
-            # Radicación según flujo
             if datos.transcripcion:
                 numero_radicado = _radicar_transcripcion(page, datos)
             else:
                 numero_radicado = _radicar_digitalizada(page, datos)
 
-            # Guardar PDF de confirmación
             pdf_path = _guardar_pdf(page, datos)
 
-            log.info("[SURA] COMPLETADO — Radicado: %s | PDF: %s",
+            log.info("[SURA] === COMPLETADO === Radicado: %s | PDF: %s",
                      numero_radicado, pdf_path)
 
             return ResultadoRadicacion(
@@ -348,17 +351,31 @@ def radicar_sura(datos: DatosRadicacion) -> ResultadoRadicacion:
                 pdf_path=pdf_path,
             )
 
-        except Exception as ex:
-            log.error("[SURA] ERROR: %s", str(ex))
+        except PWTimeout as ex:
+            log.error("[SURA] TIMEOUT: %s", str(ex))
             try:
                 page.screenshot(path="/tmp/sura_error.png", full_page=True)
-                log.info("[SURA] Screenshot error en /tmp/sura_error.png")
+                log.info("[SURA] Screenshot error guardado en /tmp/sura_error.png")
             except Exception:
                 pass
             return ResultadoRadicacion(
                 exitoso=False,
                 numero_radicado=None,
-                mensaje=f"Error: {str(ex)}",
+                mensaje=f"Timeout en portal SURA: {str(ex)[:200]}",
+                pdf_path=None,
+            )
+
+        except Exception as ex:
+            log.error("[SURA] ERROR: %s", str(ex))
+            try:
+                page.screenshot(path="/tmp/sura_error.png", full_page=True)
+                log.info("[SURA] Screenshot error guardado en /tmp/sura_error.png")
+            except Exception:
+                pass
+            return ResultadoRadicacion(
+                exitoso=False,
+                numero_radicado=None,
+                mensaje=f"Error: {str(ex)[:300]}",
                 pdf_path=None,
             )
 
@@ -366,3 +383,14 @@ def radicar_sura(datos: DatosRadicacion) -> ResultadoRadicacion:
             context.close()
             browser.close()
             log.info("[SURA] Browser cerrado")
+
+
+# Alias para compatibilidad con el __init__.py del proyecto
+async def radicar_en_sura(datos, headless: bool = True) -> ResultadoRadicacion:
+    """
+    Wrapper async para que main.py pueda llamar await radicar_en_sura(datos).
+    Internamente llama al bot síncrono (Playwright sync API).
+    """
+    import asyncio
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, radicar_sura, datos)
