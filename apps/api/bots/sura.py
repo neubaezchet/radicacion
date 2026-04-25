@@ -327,9 +327,13 @@ def radicar_sura(datos: DatosRadicacion) -> ResultadoRadicacion:
 
         try:
             log.info("[SURA] PASO 1: Abriendo login SURA")
-            page.goto(SURA_URL, wait_until="domcontentloaded", timeout=30000)
+            page.goto(SURA_URL, wait_until="networkidle", timeout=30000)
+            try:
+                title = page.title()
+            except Exception:
+                title = "(no disponible)"
             log.info("[SURA] PASO 1 OK — URL: %s | Title: %s",
-                     page.url[:80], page.title())
+                     page.url[:80], title)
 
             _login(page, datos)
             _navegar_radicacion(page)
