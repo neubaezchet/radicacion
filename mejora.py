@@ -21,7 +21,7 @@ from config import get_settings
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [SURA] %(message)s")
 log = logging.getLogger("sura")
 
-SURA_PORTAL_URL = "https://www.epssuraycompanias.com.co/eps/empleador"
+SURA_PORTAL_URL = "https://login.sura.com/sso/servicelogin.aspx?continueTo=https%3A%2F%2Fepsapps.suramericana.com%2FSemp%2F&service=epssura"
 
 
 async def _cerrar_modal_inicial(page) -> None:
