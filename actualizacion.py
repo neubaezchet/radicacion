@@ -41,13 +41,7 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
-from bots.base import (
-    BotRadicacionEPS,
-    DatosIncapacidad,
-    ResultadoRadicacion,
-    CredencialesEmpleador,
-)
-from config import get_settings
+from base import DatosRadicacion, ResultadoRadicacion
 
 log = logging.getLogger(__name__)
 
@@ -81,7 +75,14 @@ TIPO_DOC_MAP = {
     "PERMISO POR PROTECCION TEMPORL": "TT",
 }
 
-# Logger configurado
+MOCK_RADICACION = os.getenv("MOCK_RADICACION", "false").lower() == "true"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+async def _esperar_cloudflare(page) -> None:
     """Espera a que Cloudflare libere la página (hasta 25 s)."""
     log.info("[SURA] Esperando posible challenge Cloudflare...")
     for i in range(25):
@@ -146,7 +147,7 @@ async def _digitar_clave_teclado_virtual(page, clave: str) -> None:
     await page.wait_for_timeout(500)
 
 
-async def _login(page, datos: DatosIncapacidad) -> None:
+async def _login(page, datos: DatosRadicacion) -> None:
     """Completa el formulario de login en el tab de empleadores (#tabInternet)."""
 
     cred = datos.credenciales
@@ -213,7 +214,7 @@ async def _navegar_a_radicacion(page) -> None:
     log.info("[SURA] PASO 6 OK — URL radicación: %s", url_actual[:100])
 
 
-async def _radicar_incapacidad_digitalizada(page, datos: DatosIncapacidad) -> str:
+async def _radicar_incapacidad_digitalizada(page, datos: DatosRadicacion) -> str:
     """
     Flujo 1: Incapacidad digitalizada (emitida directamente por SURA).
     Solo se ingresa el número; SURA autocompleta el resto.
@@ -262,7 +263,7 @@ async def _radicar_incapacidad_digitalizada(page, datos: DatosIncapacidad) -> st
     return await _extraer_numero_radicado(page)
 
 
-async def _radicar_transcripcion(page, datos: DatosIncapacidad) -> str:
+async def _radicar_transcripcion(page, datos: DatosRadicacion) -> str:
     """
     Flujo 2: Transcripción de incapacidad (no emitida por SURA).
     Requiere adjuntar PDF y completar datos adicionales.
@@ -365,18 +366,10 @@ async def _extraer_numero_radicado(page) -> str:
 # Función principal
 # ---------------------------------------------------------------------------
 
-class BotSura(BotRadicacionEPS):
-    eps_id = "sura"
+async def radicar_sura(datos: DatosRadicacion) -> ResultadoRadicacion:
+    """Punto de entrada del bot SURA."""
 
-    async def radicar(self, datos: DatosIncapacidad, *, headless: bool = True) -> ResultadoRadicacion:
-        return await _radicar_impl(datos, headless)
-
-
-async def _radicar_impl(datos: DatosIncapacidad, headless: bool = True) -> ResultadoRadicacion:
-    """Implementación del bot SURA."""
-
-    settings = get_settings()
-    if settings.mock_radicacion:
+    if MOCK_RADICACION:
         log.info("[SURA] === MODO MOCK ===")
         return ResultadoRadicacion(
             exitoso=True,
@@ -400,7 +393,7 @@ async def _radicar_impl(datos: DatosIncapacidad, headless: bool = True) -> Resul
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(
-            headless=headless,
+            headless=True,
             args=[
                 "--no-sandbox",
                 "--disable-blink-features=AutomationControlled",
@@ -476,11 +469,3 @@ async def _radicar_impl(datos: DatosIncapacidad, headless: bool = True) -> Resul
         finally:
             await browser.close()
             log.info("[SURA] Browser cerrado")
-
-
-_bot_sura = BotSura()
-
-
-async def radicar_en_sura(datos: DatosIncapacidad, headless: bool = True) -> ResultadoRadicacion:
-    """Función pública para radicación en SURA."""
-    return await _bot_sura.radicar(datos, headless=headless)
