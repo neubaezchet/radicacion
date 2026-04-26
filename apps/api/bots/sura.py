@@ -117,21 +117,25 @@ def radicar_sura(datos: DatosRadicacion) -> ResultadoRadicacion:
             # PASO 5: Submit login
             log.info("[SURA] PASO 5: Iniciar sesión")
             page.get_by_role("button", name="Iniciar sesión").click()
-            page.wait_for_timeout(1500)
+            page.wait_for_timeout(3000)
             page.screenshot(path="/tmp/paso5_post_login.png")
 
-            # PASO 6: Navegar directo al portal de empleadores
+            # PASO 6: Navegar directo a la página de empleadores post-login
             log.info("[SURA] PASO 6: Navegando a portal empleadores")
             page.goto(
                 "https://epsapps.suramericana.com/Semp/faces/empleadores/login/loginEmpleadores.jspx",
                 wait_until="networkidle",
                 timeout=20000
             )
-            page.get_by_role("link", name="Empleadores").wait_for(state="visible", timeout=10000)
+            page.wait_for_timeout(1000)
+            page.screenshot(path="/tmp/paso6_empleadores_page.png")
+
+            # PASO 6b: Click Empleadores
+            log.info("[SURA] PASO 6b: Click Empleadores")
+            page.get_by_role("link", name="Empleadores").wait_for(state="visible", timeout=15000)
             page.get_by_role("link", name="Empleadores").click()
             page.wait_for_load_state("networkidle", timeout=15000)
-            page.screenshot(path="/tmp/paso6_empleadores.png")
-            log.info("[SURA] PASO 6 OK")
+            page.screenshot(path="/tmp/paso6b_post_empleadores.png")
 
             # PASO 7: Seleccionar empresa
             log.info("[SURA] PASO 7: Seleccionar empresa")
