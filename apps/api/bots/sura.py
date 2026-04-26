@@ -132,10 +132,41 @@ def radicar_sura(datos: DatosRadicacion) -> ResultadoRadicacion:
 
             # PASO 6b: Click Empleadores
             log.info("[SURA] PASO 6b: Click Empleadores")
-            page.get_by_role("link", name="Empleadores").wait_for(state="visible", timeout=15000)
-            page.get_by_role("link", name="Empleadores").click()
-            page.wait_for_load_state("networkidle", timeout=15000)
-            page.screenshot(path="/tmp/paso6b_post_empleadores.png")
+            try:
+                page.get_by_role("link", name="Empleadores").wait_for(state="visible", timeout=15000)
+                page.get_by_role("link", name="Empleadores").click()
+                page.wait_for_load_state("networkidle", timeout=15000)
+                page.screenshot(path="/tmp/paso6b_post_empleadores.png")
+            except Exception as e:
+                # Captura diagnóstica cuando falla
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                log.error("[SURA] TIMEOUT en Empleadores: %s", str(e))
+                
+                # Screenshot full page
+                try:
+                    page.screenshot(path=f"/tmp/fallo_empleadores_{timestamp}.png", full_page=True)
+                    log.info("[SURA] Screenshot guardado: /tmp/fallo_empleadores_{timestamp}.png")
+                except Exception as ss_ex:
+                    log.error("[SURA] Error capturando screenshot: %s", ss_ex)
+                
+                # HTML completo
+                try:
+                    html_content = page.content()
+                    html_path = f"/tmp/fallo_empleadores_{timestamp}.html"
+                    with open(html_path, "w", encoding="utf-8") as f:
+                        f.write(html_content)
+                    log.info("[SURA] HTML guardado: %s", html_path)
+                except Exception as html_ex:
+                    log.error("[SURA] Error guardando HTML: %s", html_ex)
+                
+                # Loga lo que ves en pantalla
+                try:
+                    page_text = page.locator("body").inner_text()
+                    log.error("[SURA] Texto en página:\n%s", page_text[:500])
+                except Exception as txt_ex:
+                    log.error("[SURA] Error extrayendo texto: %s", txt_ex)
+                
+                raise
 
             # PASO 7: Seleccionar empresa
             log.info("[SURA] PASO 7: Seleccionar empresa")
