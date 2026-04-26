@@ -72,17 +72,23 @@ def radicar_sura(datos: DatosRadicacion) -> ResultadoRadicacion:
             log.info("[SURA] PASO 1: Abriendo login")
             page.goto(SURA_URL, wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(1000)
+            page.screenshot(path="/tmp/paso1_login_page.png")
+            log.info("[SURA] PASO 1 OK")
 
             # PASO 2: Tipo documento
             log.info("[SURA] PASO 2: Tipo documento = %s", cred.tipo_documento)
             page.locator("#ctl00_ContentMain_suraType").select_option(cred.tipo_documento)
             page.wait_for_timeout(500)
+            page.screenshot(path="/tmp/paso2_tipo_doc.png")
+            log.info("[SURA] PASO 2 OK")
 
             # PASO 3: Número documento
             log.info("[SURA] PASO 3: Número = %s", cred.numero_documento)
             page.locator("#suraName").click()
             page.locator("#suraName").fill(cred.numero_documento)
             page.wait_for_timeout(500)
+            page.screenshot(path="/tmp/paso3_numero_doc.png")
+            log.info("[SURA] PASO 3 OK")
 
             # PASO 4: Teclado virtual + PIN
             log.info("[SURA] PASO 4: Digitando PIN")
@@ -90,42 +96,70 @@ def radicar_sura(datos: DatosRadicacion) -> ResultadoRadicacion:
             page.wait_for_timeout(800)
 
             for digito in cred.clave:
-                page.locator(f'button[name="{ASCII_PIN[digito]}"]').click()
-                page.wait_for_timeout(100)
+                try:
+                    page.locator(f'button[name="{ASCII_PIN[digito]}"]').click(timeout=5000)
+                    page.wait_for_timeout(100)
+                except Exception as ex:
+                    log.error("[SURA] Error digitando PIN %s: %s", digito, ex)
+                    raise
 
             # Aceptar PIN: div().nth(3) según grabación
-            page.locator("div").nth(3).click()
+            try:
+                page.locator("div").nth(3).click(timeout=5000)
+            except Exception as ex:
+                log.warning("[SURA] No se encontró div().nth(3), intentando alternativa")
+                page.get_by_role("button").filter(has_text="✔").click(timeout=5000)
+            
             page.wait_for_timeout(400)
+            page.screenshot(path="/tmp/paso4_pin_aceptado.png")
+            log.info("[SURA] PASO 4 OK")
 
             # PASO 5: Submit login
             log.info("[SURA] PASO 5: Iniciar sesión")
             page.get_by_role("button", name="Iniciar sesión").click()
-            page.wait_for_load_state("networkidle", timeout=20000)
+            page.wait_for_timeout(1500)
+            page.screenshot(path="/tmp/paso5_post_login.png")
+            page.get_by_role("link", name="Empleadores").wait_for(state="visible", timeout=15000)
 
             # PASO 6: Empleadores
             log.info("[SURA] PASO 6: Link Empleadores")
             page.get_by_role("link", name="Empleadores").click()
             page.wait_for_load_state("networkidle", timeout=15000)
+            page.screenshot(path="/tmp/paso6_empleadores.png")
+            log.info("[SURA] PASO 6 OK")
 
             # PASO 7: Seleccionar empresa
             log.info("[SURA] PASO 7: Seleccionar empresa")
+            page.locator("#SempTranEmpresa").wait_for(state="visible", timeout=10000)
             page.locator("#SempTranEmpresa").click()
             page.wait_for_load_state("networkidle", timeout=10000)
+            page.screenshot(path="/tmp/paso7_seleccionar_empresa.png")
+            log.info("[SURA] PASO 7 OK")
 
             # PASO 8: Radicar Incapacidades
             log.info("[SURA] PASO 8: Radicar Incapacidades")
+            page.get_by_role("link", name="Radicar Incapacidades").wait_for(state="visible", timeout=10000)
             page.get_by_role("link", name="Radicar Incapacidades").click()
             page.wait_for_load_state("networkidle", timeout=15000)
+            page.screenshot(path="/tmp/paso8_radicar_incapacidades.png")
+            log.info("[SURA] PASO 8 OK")
 
             # PASO 9-11: Formulario radicación
             log.info("[SURA] PASO 9-11: Llenando formulario")
-            frame = page.frame_locator('iframe[name="index1"]').frame_locator("#contenido")
+            try:
+                frame = page.frame_locator('iframe[name="index1"]').frame_locator("#contenido")
+                frame.locator("body").wait_for(state="visible", timeout=10000)
+            except Exception as ex:
+                log.error("[SURA] Frame no encontrado: %s", ex)
+                raise
 
             prefijo = datos.prefijo_incapacidad or "0"
+            frame.locator('[id="radicarIncapacidad:tipoIncapacidad"]').wait_for(state="visible", timeout=5000)
             frame.locator('[id="radicarIncapacidad:tipoIncapacidad"]').click()
             frame.locator('[id="radicarIncapacidad:tipoIncapacidad"]').fill(prefijo)
             page.wait_for_timeout(300)
 
+            frame.locator('[id="radicarIncapacidad:numeroIncapacidad"]').wait_for(state="visible", timeout=5000)
             frame.locator('[id="radicarIncapacidad:numeroIncapacidad"]').click()
             frame.locator('[id="radicarIncapacidad:numeroIncapacidad"]').fill(datos.numero_incapacidad)
             page.wait_for_timeout(300)
@@ -133,8 +167,11 @@ def radicar_sura(datos: DatosRadicacion) -> ResultadoRadicacion:
             frame.locator("html").click()
             page.wait_for_timeout(500)
 
+            frame.get_by_role("link", name="Radicar").wait_for(state="visible", timeout=5000)
             frame.get_by_role("link", name="Radicar").click()
             page.wait_for_load_state("networkidle", timeout=20000)
+            page.screenshot(path="/tmp/paso9_formulario_completado.png")
+            log.info("[SURA] PASO 9-11 OK")
 
             # PASO 12: Extraer radicado
             log.info("[SURA] PASO 12: Extrayendo número radicado")
@@ -157,6 +194,11 @@ def radicar_sura(datos: DatosRadicacion) -> ResultadoRadicacion:
 
     except Exception as ex:
         log.error("[SURA] ERROR: %s", str(ex))
+        try:
+            page.screenshot(path="/tmp/error_screenshot.png")
+            log.info("[SURA] Screenshot de error guardado: /tmp/error_screenshot.png")
+        except Exception:
+            pass
         return ResultadoRadicacion(
             exitoso=False,
             numero_radicado=None,
