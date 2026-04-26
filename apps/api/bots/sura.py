@@ -130,41 +130,51 @@ def radicar_sura(datos: DatosRadicacion) -> ResultadoRadicacion:
             page.wait_for_timeout(1000)
             page.screenshot(path="/tmp/paso6_empleadores_page.png")
 
-            # PASO 6b: Click Empleadores
-            log.info("[SURA] PASO 6b: Click Empleadores")
+            # PASO 6b: Navegar menú "Empleadores" (es un dropdown)
+            log.info("[SURA] PASO 6b: Navegando menú Empleadores")
             try:
-                page.get_by_role("link", name="Empleadores").wait_for(state="visible", timeout=15000)
-                page.get_by_role("link", name="Empleadores").click()
-                page.wait_for_load_state("networkidle", timeout=15000)
-                page.screenshot(path="/tmp/paso6b_post_empleadores.png")
-            except Exception as e:
-                # Captura diagnóstica cuando falla
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                log.error("[SURA] TIMEOUT en Empleadores: %s", str(e))
+                # 1. Hover sobre el menú "Empleadores" para desplegarlo
+                page.get_by_role("link", name="Empleadores").wait_for(state="visible", timeout=10000)
+                page.get_by_role("link", name="Empleadores").hover()
+                page.wait_for_timeout(500)
                 
-                # Screenshot full page
+                # 2. Esperar que aparezca "Empresa" en el menú
+                page.wait_for_selector("text=Empresa", state="visible", timeout=10000)
+                page.wait_for_timeout(300)
+                
+                # 3. Hover en "Empresa" para que aparezca el submenú
+                page.get_by_text("Empresa").hover()
+                page.wait_for_timeout(500)
+                
+                # 4. Esperar que aparezca "Radicar Incapacidades"
+                page.wait_for_selector("text=Radicar Incapacidades", state="visible", timeout=10000)
+                page.wait_for_timeout(300)
+                
+                # 5. Click en "Radicar Incapacidades"
+                page.get_by_text("Radicar Incapacidades").click()
+                page.wait_for_load_state("networkidle", timeout=15000)
+                page.screenshot(path="/tmp/paso6b_menu_empleadores.png")
+                log.info("[SURA] PASO 6b OK")
+            except Exception as e:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                log.error("[SURA] FALLO en menú Empleadores: %s", str(e))
+                
+                # Screenshot diagnóstico
                 try:
-                    page.screenshot(path=f"/tmp/fallo_empleadores_{timestamp}.png", full_page=True)
-                    log.info("[SURA] Screenshot guardado: /tmp/fallo_empleadores_{timestamp}.png")
+                    page.screenshot(path=f"/tmp/fallo_menu_empleadores_{timestamp}.png", full_page=True)
+                    log.info("[SURA] Screenshot guardado: /tmp/fallo_menu_empleadores_{timestamp}.png")
                 except Exception as ss_ex:
                     log.error("[SURA] Error capturando screenshot: %s", ss_ex)
                 
                 # HTML completo
                 try:
                     html_content = page.content()
-                    html_path = f"/tmp/fallo_empleadores_{timestamp}.html"
+                    html_path = f"/tmp/fallo_menu_empleadores_{timestamp}.html"
                     with open(html_path, "w", encoding="utf-8") as f:
                         f.write(html_content)
                     log.info("[SURA] HTML guardado: %s", html_path)
                 except Exception as html_ex:
                     log.error("[SURA] Error guardando HTML: %s", html_ex)
-                
-                # Loga lo que ves en pantalla
-                try:
-                    page_text = page.locator("body").inner_text()
-                    log.error("[SURA] Texto en página:\n%s", page_text[:500])
-                except Exception as txt_ex:
-                    log.error("[SURA] Error extrayendo texto: %s", txt_ex)
                 
                 raise
 
