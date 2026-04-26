@@ -133,27 +133,16 @@ def radicar_sura(datos: DatosRadicacion) -> ResultadoRadicacion:
             # PASO 6b: Navegar menú "Empleadores" (es un dropdown)
             log.info("[SURA] PASO 6b: Navegando menú Empleadores")
             try:
-                # 1. Hover sobre el menú "Empleadores" para desplegarlo
+                # 1. Hover sobre "Empleadores" para desplegar el menú
                 page.get_by_role("link", name="Empleadores").wait_for(state="visible", timeout=10000)
                 page.get_by_role("link", name="Empleadores").hover()
-                page.wait_for_timeout(500)
-                
-                # 2. Esperar que aparezca "Empresa" en el menú
+                page.wait_for_timeout(600)
+
+                # 2. Esperar "Empresa" y hacer clic (solo hasta aquí — el resto lo hacen PASO 7 y 8)
                 page.wait_for_selector("text=Empresa", state="visible", timeout=10000)
-                page.wait_for_timeout(300)
-                
-                # 3. Hover en "Empresa" para que aparezca el submenú
-                page.get_by_text("Empresa").hover()
-                page.wait_for_timeout(500)
-                
-                # 4. Esperar que aparezca "Radicar Incapacidades"
-                page.wait_for_selector("text=Radicar Incapacidades", state="visible", timeout=10000)
-                page.wait_for_timeout(300)
-                
-                # 5. Click en "Radicar Incapacidades"
-                page.get_by_text("Radicar Incapacidades").click()
+                page.get_by_text("Empresa").click()
                 page.wait_for_load_state("networkidle", timeout=15000)
-                page.screenshot(path="/tmp/paso6b_menu_empleadores.png")
+                page.screenshot(path="/tmp/paso6b_menu_empresa.png")
                 log.info("[SURA] PASO 6b OK")
             except Exception as e:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
