@@ -1,17 +1,16 @@
 """
-Bot SURA — 100% basado en grabación real de playwright codegen.
-Adaptado del flujo capturado: grabacion_sura.py
+Bot SURA — construido desde el codegen real.
+Radica incapacidades en el portal EPS SURA.
 """
 
 import logging
 import os
 import re
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
-
-from bots.base import DatosRadicacion, ResultadoRadicacion
+from playwright.sync_api import sync_playwright
 
 log = logging.getLogger(__name__)
 
@@ -21,264 +20,330 @@ SURA_URL = (
     "&service=epssura"
 )
 
-MOCK_RADICACION = os.getenv("MOCK_RADICACION", "false").lower() == "true"
 PDF_DIR = Path(os.getenv("PDF_OUTPUT_DIR", "/tmp/radicaciones"))
 
-# Mapa ASCII: dígito → código button
+# Mapa dígito → código ASCII del botón PIN de SURA
+# 0=48, 1=49, 2=50 ... 9=57
 ASCII_PIN = {str(d): str(48 + d) for d in range(10)}
 
 
-def radicar_sura(datos: DatosRadicacion) -> ResultadoRadicacion:
-    if MOCK_RADICACION:
-        log.info("[SURA] MODO MOCK")
-        return ResultadoRadicacion(
-            exitoso=True,
-            numero_radicado="MOCK-20260425-001",
-            mensaje="Radicación simulada",
-            pdf_path=None,
-        )
+def _debug_teclado_virtual(page):
+    """Captura información del teclado virtual para debugging."""
+    try:
+        debug_dir = Path(tempfile.gettempdir()) / "sura_debug"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Capturar HTML del teclado
+        html_path = debug_dir / f"teclado_virtual_{timestamp}.html"
+        botones = page.locator("button").all()
+        html_content = "<h1>Botones del Teclado Virtual</h1>\n<table border='1'><tr><th>Index</th><th>Texto</th><th>Atributos</th></tr>\n"
+        
+        for i, btn in enumerate(botones):
+            try:
+                texto = btn.text_content().strip()
+                html_attr = page.evaluate("el => el.outerHTML", btn.element_handle())
+                html_content += f"<tr><td>{i}</td><td>{texto}</td><td><pre>{html_attr}</pre></td></tr>\n"
+            except:
+                pass
+        
+        html_content += "</table>"
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        
+        log.info("[SURA DEBUG] Estructura del teclado guardada en: %s", html_path)
+        
+        # También guardar screenshot
+        screen_path = debug_dir / f"teclado_virtual_{timestamp}.png"
+        page.screenshot(path=str(screen_path), full_page=False)
+        log.info("[SURA DEBUG] Screenshot guardado en: %s", screen_path)
+        
+    except Exception as e:
+        log.warning("[SURA DEBUG] No se pudo capturar info del teclado: %s", str(e))
+
+
+def radicar_sura(
+    tipo_documento: str,
+    numero_documento: str,
+    clave: str,
+    numero_incapacidad: str,
+    prefijo_incapacidad: str = "0",
+    documento_trabajador: str = None,
+    fecha_inicio: str = None,
+    headless: bool = True,
+) -> dict:
+    """
+    Radica una incapacidad en el portal EPS SURA.
+
+    Parámetros:
+        tipo_documento      : "C" = Cédula, "A" = NIT
+        numero_documento    : número del empleador
+        clave               : PIN numérico ej: "22025"
+        numero_incapacidad  : número de la incapacidad
+        prefijo_incapacidad : prefijo, por defecto "0"
+        documento_trabajador: cédula del trabajador (para el PDF)
+        fecha_inicio        : fecha inicio incapacidad (para el PDF)
+        headless            : True = sin ventana (servidor), False = con ventana (pruebas)
+
+    Retorna dict con:
+        exitoso, numero_radicado, mensaje, pdf_path
+    """
 
     log.info("[SURA] === INICIO ===")
-    cred = datos.credenciales
 
-    try:
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-blink-features=AutomationControlled",
-                    "--disable-dev-shm-usage",
-                    "--window-size=1280,900",
-                ],
-            )
-            context = browser.new_context(
-                viewport={"width": 1280, "height": 900},
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                ),
-                locale="es-CO",
-                timezone_id="America/Bogota",
-            )
-            context.add_init_script(
-                "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
-                "window.chrome={runtime:{}};"
-            )
-            page = context.new_page()
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(
+            headless=headless,
+            args=[
+                "--no-sandbox",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",
+                "--window-size=1280,900",
+            ],
+        )
+        
+        # Grabar video si no es headless (para debugging)
+        video_path = None
+        if not headless:
+            video_dir = Path(tempfile.gettempdir()) / "sura_videos"
+            video_dir.mkdir(parents=True, exist_ok=True)
+            video_path = str(video_dir / f"sura_{datetime.now().strftime('%Y%m%d_%H%M%S')}.webm")
+        
+        context = browser.new_context(
+            viewport={"width": 1280, "height": 900},
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            locale="es-CO",
+            timezone_id="America/Bogota",
+            record_video_dir=str(Path(tempfile.gettempdir()) / "sura_videos") if not headless else None,
+        )
+        context.add_init_script(
+            "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
+            "window.chrome={runtime:{}};"
+        )
+        page = context.new_page()
 
-            # PASO 1: Login page
-            log.info("[SURA] PASO 1: Abriendo login")
+        try:
+            # ── PASO 1: Abrir portal ──────────────────────────────────────
+            log.info("[SURA] PASO 1: Abriendo portal")
             page.goto(SURA_URL, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(1000)
-            page.screenshot(path="/tmp/paso1_login_page.png")
-            log.info("[SURA] PASO 1 OK")
 
-            # PASO 2: Tipo documento
-            log.info("[SURA] PASO 2: Tipo documento = %s", cred.tipo_documento)
-            page.locator("#ctl00_ContentMain_suraType").select_option(cred.tipo_documento)
+            # ── PASO 2: Tipo de documento ─────────────────────────────────
+            log.info("[SURA] PASO 2: Tipo documento = %s", tipo_documento)
+            page.locator("#ctl00_ContentMain_suraType").select_option(tipo_documento)
             page.wait_for_timeout(500)
-            page.screenshot(path="/tmp/paso2_tipo_doc.png")
-            log.info("[SURA] PASO 2 OK")
 
-            # PASO 3: Número documento
-            log.info("[SURA] PASO 3: Número = %s", cred.numero_documento)
+            # ── PASO 3: Número de documento ───────────────────────────────
+            log.info("[SURA] PASO 3: Número = %s", numero_documento)
             page.locator("#suraName").click()
-            page.locator("#suraName").fill(cred.numero_documento)
-            page.wait_for_timeout(500)
-            page.screenshot(path="/tmp/paso3_numero_doc.png")
-            log.info("[SURA] PASO 3 OK")
+            page.locator("#suraName").fill(numero_documento)
+            page.wait_for_timeout(400)
 
-            # PASO 4: Teclado virtual + PIN
+            # ── PASO 4: PIN ───────────────────────────────────────────────
             log.info("[SURA] PASO 4: Digitando PIN")
             page.locator("#suraPassword").click()
-            page.wait_for_timeout(800)
-
-            for digito in cred.clave:
-                try:
-                    page.locator(f'button[name="{ASCII_PIN[digito]}"]').click(timeout=5000)
-                    page.wait_for_timeout(100)
-                except Exception as ex:
-                    log.error("[SURA] Error digitando PIN %s: %s", digito, ex)
-                    raise
-
-            # Aceptar PIN: div().nth(3) según grabación
-            try:
-                page.locator("div").nth(3).click(timeout=5000)
-            except Exception as ex:
-                log.warning("[SURA] No se encontró div().nth(3), intentando alternativa")
-                page.get_by_role("button").filter(has_text="✔").click(timeout=5000)
+            page.wait_for_timeout(600)
             
+            # Digitar PIN usando teclado virtual aleatorio
+            for digito in clave:
+                log.info("[SURA] Buscando botón del dígito: %s", digito)
+                
+                # Buscar botón que contenga el dígito (flexible para orden aleatorio)
+                # Intenta múltiples selectores para máxima compatibilidad
+                botones_encontrados = page.locator(
+                    f'button:has-text("{digito}"), button[value="{digito}"], button[data-value="{digito}"]'
+                ).all()
+                
+                if not botones_encontrados:
+                    # Si no encuentra con los selectores anteriores, busca usando XPath
+                    botones_encontrados = page.locator(
+                        f'xpath=//button[contains(text(), "{digito}")]'
+                    ).all()
+                
+                if botones_encontrados:
+                    # Verificar que el botón tenga exactamente el dígito (no parte de otro número)
+                    for btn in botones_encontrados:
+                        texto_btn = btn.text_content().strip()
+                        if texto_btn == digito:
+                            log.info("[SURA] ✓ Botón encontrado para dígito %s", digito)
+                            btn.click(timeout=5000)
+                            page.wait_for_timeout(200)
+                            break
+                else:
+                    # FALLO: No se encontró el botón
+                    log.error("[SURA] ✗ No se encontró botón para dígito %s", digito)
+                    _debug_teclado_virtual(page)
+                    raise Exception(
+                        f"No se encontró botón para dígito {digito} en teclado virtual. "
+                        f"Selectors probados: has-text, value, data-value, XPath. "
+                        f"Posible cambio en estructura HTML de SURA. "
+                        f"Ver archivos de debug en: {Path(tempfile.gettempdir()) / 'sura_debug'}"
+                    )
+
+            # Confirmar PIN con botón ✔
+            log.info("[SURA] Confirmando PIN con botón ✔")
+            page.get_by_role("button", name="✔").click(timeout=5000)
             page.wait_for_timeout(400)
-            page.screenshot(path="/tmp/paso4_pin_aceptado.png")
-            log.info("[SURA] PASO 4 OK")
 
-            # PASO 5: Submit login
-            log.info("[SURA] PASO 5: Iniciar sesión")
+            # ── PASO 5: Iniciar sesión ────────────────────────────────────
+            log.info("[SURA] PASO 5: Iniciando sesión")
             page.get_by_role("button", name="Iniciar sesión").click()
-            page.wait_for_timeout(3000)
-            page.screenshot(path="/tmp/paso5_post_login.png")
 
-            # PASO 6: Navegar directo a la página de empleadores post-login
-            log.info("[SURA] PASO 6: Navegando a portal empleadores")
-            page.goto(
-                "https://epsapps.suramericana.com/Semp/faces/empleadores/login/loginEmpleadores.jspx",
-                wait_until="networkidle",
-                timeout=20000
+            # Esperar que el SSO redirija al portal (hasta 60 segundos)
+            page.wait_for_url("**/Semp/**", timeout=60000)
+            page.get_by_role("link", name="Empleadores").wait_for(
+                state="visible", timeout=60000
             )
-            page.wait_for_timeout(1000)
-            page.screenshot(path="/tmp/paso6_empleadores_page.png")
+            log.info("[SURA] PASO 5 OK — portal cargado")
 
-            # PASO 6b: Navegar menú "Empleadores" (es un dropdown)
-            log.info("[SURA] PASO 6b: Navegando menú Empleadores")
-            try:
-                # 1. Hover sobre "Empleadores" para desplegar el menú
-                page.get_by_role("link", name="Empleadores").wait_for(state="visible", timeout=10000)
-                page.get_by_role("link", name="Empleadores").hover()
-                page.wait_for_timeout(600)
+            # ── PASO 6: Hover Empleadores → Empresa ───────────────────────
+            log.info("[SURA] PASO 6: Navegando al menú Empresa")
+            page.get_by_role("link", name="Empleadores").hover()
+            page.wait_for_timeout(800)
+            page.get_by_role("link", name="Empresa").click()
+            page.wait_for_timeout(500)
+            log.info("[SURA] PASO 6 OK")
 
-                # 2. Esperar "Empresa" y hacer clic (solo hasta aquí — el resto lo hacen PASO 7 y 8)
-                page.wait_for_selector("text=Empresa", state="visible", timeout=10000)
-                page.get_by_text("Empresa").click()
-                page.wait_for_load_state("networkidle", timeout=15000)
-                page.screenshot(path="/tmp/paso6b_menu_empresa.png")
-                log.info("[SURA] PASO 6b OK")
-            except Exception as e:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                log.error("[SURA] FALLO en menú Empleadores: %s", str(e))
-                
-                # Screenshot diagnóstico
-                try:
-                    page.screenshot(path=f"/tmp/fallo_menu_empleadores_{timestamp}.png", full_page=True)
-                    log.info("[SURA] Screenshot guardado: /tmp/fallo_menu_empleadores_{timestamp}.png")
-                except Exception as ss_ex:
-                    log.error("[SURA] Error capturando screenshot: %s", ss_ex)
-                
-                # HTML completo
-                try:
-                    html_content = page.content()
-                    html_path = f"/tmp/fallo_menu_empleadores_{timestamp}.html"
-                    with open(html_path, "w", encoding="utf-8") as f:
-                        f.write(html_content)
-                    log.info("[SURA] HTML guardado: %s", html_path)
-                except Exception as html_ex:
-                    log.error("[SURA] Error guardando HTML: %s", html_ex)
-                
-                raise
-
-            # PASO 7: Seleccionar empresa
-            log.info("[SURA] PASO 7: Seleccionar empresa")
-            page.locator("#SempTranEmpresa").wait_for(state="visible", timeout=10000)
+            # ── PASO 7: Seleccionar empresa ───────────────────────────────
+            log.info("[SURA] PASO 7: Seleccionando empresa")
+            page.locator("#SempTranEmpresa").wait_for(state="visible", timeout=15000)
             page.locator("#SempTranEmpresa").click()
-            page.wait_for_load_state("networkidle", timeout=10000)
-            page.screenshot(path="/tmp/paso7_seleccionar_empresa.png")
+            page.wait_for_load_state("networkidle", timeout=15000)
             log.info("[SURA] PASO 7 OK")
 
-            # PASO 8: Radicar Incapacidades
-            log.info("[SURA] PASO 8: Radicar Incapacidades")
-            page.get_by_role("link", name="Radicar Incapacidades").wait_for(state="visible", timeout=10000)
+            # ── PASO 8: Radicar Incapacidades ─────────────────────────────
+            log.info("[SURA] PASO 8: Click en Radicar Incapacidades")
+            page.get_by_role("link", name="Radicar Incapacidades").wait_for(
+                state="visible", timeout=15000
+            )
             page.get_by_role("link", name="Radicar Incapacidades").click()
             page.wait_for_load_state("networkidle", timeout=15000)
-            page.screenshot(path="/tmp/paso8_radicar_incapacidades.png")
             log.info("[SURA] PASO 8 OK")
 
-            # PASO 9-11: Formulario radicación
-            log.info("[SURA] PASO 9-11: Llenando formulario")
-            try:
-                frame = page.frame_locator('iframe[name="index1"]').frame_locator("#contenido")
-                frame.locator("body").wait_for(state="visible", timeout=10000)
-            except Exception as ex:
-                log.error("[SURA] Frame no encontrado: %s", ex)
-                raise
+            # ── PASO 9: Formulario en iframe ──────────────────────────────
+            log.info("[SURA] PASO 9: Llenando formulario")
+            frame = (
+                page.frame_locator('iframe[name="index1"]')
+                    .frame_locator("#contenido")
+            )
+            frame.locator("body").wait_for(state="visible", timeout=10000)
 
-            prefijo = datos.prefijo_incapacidad or "0"
-            frame.locator('[id="radicarIncapacidad:tipoIncapacidad"]').wait_for(state="visible", timeout=5000)
+            # Prefijo
+            frame.locator('[id="radicarIncapacidad:tipoIncapacidad"]').wait_for(
+                state="visible", timeout=8000
+            )
             frame.locator('[id="radicarIncapacidad:tipoIncapacidad"]').click()
-            frame.locator('[id="radicarIncapacidad:tipoIncapacidad"]').fill(prefijo)
+            frame.locator('[id="radicarIncapacidad:tipoIncapacidad"]').fill(
+                prefijo_incapacidad
+            )
             page.wait_for_timeout(300)
 
-            frame.locator('[id="radicarIncapacidad:numeroIncapacidad"]').wait_for(state="visible", timeout=5000)
+            # Número de incapacidad
+            frame.locator('[id="radicarIncapacidad:numeroIncapacidad"]').wait_for(
+                state="visible", timeout=8000
+            )
             frame.locator('[id="radicarIncapacidad:numeroIncapacidad"]').click()
-            frame.locator('[id="radicarIncapacidad:numeroIncapacidad"]').fill(datos.numero_incapacidad)
+            frame.locator('[id="radicarIncapacidad:numeroIncapacidad"]').fill(
+                numero_incapacidad
+            )
             page.wait_for_timeout(300)
 
+            # Click fuera para que el portal valide los campos
             frame.locator("html").click()
-            page.wait_for_timeout(500)
+            page.wait_for_timeout(600)
 
-            frame.get_by_role("link", name="Radicar").wait_for(state="visible", timeout=5000)
+            # Botón Radicar
+            frame.get_by_role("link", name="Radicar").wait_for(
+                state="visible", timeout=8000
+            )
             frame.get_by_role("link", name="Radicar").click()
             page.wait_for_load_state("networkidle", timeout=20000)
-            page.screenshot(path="/tmp/paso9_formulario_completado.png")
-            log.info("[SURA] PASO 9-11 OK")
+            log.info("[SURA] PASO 9 OK")
 
-            # PASO 12: Extraer radicado
-            log.info("[SURA] PASO 12: Extrayendo número radicado")
+            # ── PASO 10: Extraer número de radicado ───────────────────────
             radicado = _extraer_radicado(page, frame)
+            pdf_path = _guardar_pdf(page, documento_trabajador, fecha_inicio)
 
-            # PASO 13: Guardar PDF
-            pdf_path = _guardar_pdf(page, datos)
+            log.info("[SURA] === FIN OK === Radicado: %s", radicado)
+            return {
+                "exitoso": True,
+                "numero_radicado": radicado,
+                "mensaje": "Radicación exitosa",
+                "pdf_path": pdf_path,
+            }
 
-            log.info("[SURA] === OK === Radicado: %s", radicado)
-            return ResultadoRadicacion(
-                exitoso=True,
-                numero_radicado=radicado,
-                mensaje="Radicación exitosa",
-                pdf_path=pdf_path,
-            )
+        except Exception as ex:
+            log.error("[SURA] ERROR: %s", str(ex), exc_info=True)
+            
+            # Guardar screenshot del error
+            try:
+                screenshot_dir = Path(tempfile.gettempdir()) / "sura_errors"
+                screenshot_dir.mkdir(parents=True, exist_ok=True)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                screenshot_path = screenshot_dir / f"error_{timestamp}.png"
+                page.screenshot(path=str(screenshot_path), full_page=True)
+                log.info("[SURA] Screenshot de error guardado en: %s", screenshot_path)
+            except Exception as screenshot_error:
+                log.error("[SURA] Error capturando screenshot: %s", screenshot_error)
+            
+            return {
+                "exitoso": False,
+                "numero_radicado": None,
+                "mensaje": f"Error: {str(ex)[:300]}",
+                "pdf_path": None,
+            }
 
         finally:
             context.close()
             browser.close()
 
-    except Exception as ex:
-        log.error("[SURA] ERROR: %s", str(ex))
-        try:
-            page.screenshot(path="/tmp/error_screenshot.png")
-            log.info("[SURA] Screenshot de error guardado: /tmp/error_screenshot.png")
-        except Exception:
-            pass
-        return ResultadoRadicacion(
-            exitoso=False,
-            numero_radicado=None,
-            mensaje=f"Error: {str(ex)[:300]}",
-            pdf_path=None,
-        )
-
 
 def _extraer_radicado(page, frame) -> str:
-    """Busca el número radicado en la respuesta."""
+    """Busca el número de radicado en el texto de la página."""
     for fuente in [frame, page]:
         try:
             texto = fuente.locator("body").inner_text(timeout=5000)
             match = re.search(r"[Rr]adicado[:\s#Nº]*(\d+)", texto)
             if match:
-                radicado = match.group(1)
-                log.info("[SURA] Radicado encontrado: %s", radicado)
-                return radicado
+                return match.group(1)
         except Exception:
             continue
-    log.warning("[SURA] Radicado no encontrado")
     return "RADICADO_NO_ENCONTRADO"
 
 
-def _guardar_pdf(page, datos: DatosRadicacion) -> str | None:
-    """Guarda screenshot como PDF."""
+def _guardar_pdf(page, documento_trabajador: str, fecha_inicio: str) -> str | None:
+    """Guarda la página actual como PDF."""
     try:
         PDF_DIR.mkdir(parents=True, exist_ok=True)
-        fecha = datos.fecha_inicio_incapacidad or datetime.now().strftime("%d %m %Y")
-        cedula = datos.documento_trabajador or "sin_cedula"
-        nombre = f"{cedula} {fecha}.pdf"
-        ruta = PDF_DIR / nombre
+        fecha = fecha_inicio or datetime.now().strftime("%d_%m_%Y")
+        cedula = documento_trabajador or "sin_cedula"
+        ruta = PDF_DIR / f"{cedula}_{fecha}.pdf"
         page.pdf(path=str(ruta))
-        log.info("[SURA] PDF guardado: %s", ruta)
         return str(ruta)
     except Exception:
         return None
 
 
-async def radicar_en_sura(datos, headless: bool = True) -> ResultadoRadicacion:
-    """Wrapper async para FastAPI."""
-    import asyncio
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, radicar_sura, datos)
+# ── Punto de entrada para pruebas locales ────────────────────────────────────
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+
+    resultado = radicar_sura(
+        tipo_documento="C",           # C = Cédula
+        numero_documento="51899483",  # reemplaza con tu número
+        clave="22025",                # reemplaza con tu PIN
+        numero_incapacidad="12345",   # reemplaza con el número real
+        prefijo_incapacidad="0",
+        documento_trabajador="987654321",
+        fecha_inicio="26_04_2026",
+        headless=False,               # False = con ventana para ver qué hace
+    )
+
+    print("\n=== RESULTADO ===")
+    print(f"Exitoso      : {resultado['exitoso']}")
+    print(f"Radicado     : {resultado['numero_radicado']}")
+    print(f"Mensaje      : {resultado['mensaje']}")
+    print(f"PDF          : {resultado['pdf_path']}")

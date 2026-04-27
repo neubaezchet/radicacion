@@ -1,4 +1,4 @@
-from bots.base import (
+from .base import (
     CredencialesEmpleador,
     DatosRadicacion,
     DatosIncapacidad,      # alias de DatosRadicacion
@@ -6,7 +6,7 @@ from bots.base import (
     TIPOS_DOCUMENTO_VALIDOS,
     TIPOS_DOCUMENTO_LABELS,
 )
-from bots.sura import radicar_en_sura, radicar_sura
+from .sura import radicar_en_sura, radicar_sura
 
 __all__ = [
     "CredencialesEmpleador",
