@@ -63,25 +63,103 @@ def _debug_teclado_virtual(page):
 
 
 def _digitar_pin(page, pin: str) -> None:
-    ASCII_PIN = {str(d): str(48 + d) for d in range(10)}
+    """
+    Digita el PIN con simulación estricta de ratón humano para evitar 
+    los bloqueos de isTrusted y velocidad del portal SURA.
+    
+    Estrategia:
+    - Usa bounding_box() para obtener coordenadas exactas del botón
+    - page.mouse.move() con steps=5 para viaje gradual del ratón
+    - page.mouse.down() + wait + page.mouse.up() para clic lento (200ms)
+    - Pausas realistas entre dígitos (800ms)
+    """
+    log.info("[SURA] Abriendo teclado virtual (simulación humana de ratón)")
+    
+    # 1. Clic en el campo para abrir el teclado
+    page.locator("#suraPassword").click(delay=150)
+    page.wait_for_timeout(500)
+    
+    # 2. Esperamos a que la caja del teclado termine de hacer su animación
+    page.locator(".ui-keyboard-keyset").wait_for(state="visible", timeout=10000)
+    page.wait_for_timeout(1000)
+    log.info("[SURA] Teclado virtual detectado y listo")
 
-    # Abrir teclado
-    page.locator("#suraPassword").click()
-    page.wait_for_timeout(800)
-
-    # Esperar que el teclado esté listo
-    page.locator('button[name="48"]').wait_for(state="visible", timeout=8000)
-
+    # 3. Digitar cada número con movimientos humanos
     for i, digito in enumerate(pin):
-        codigo = ASCII_PIN[digito]
         log.info("[SURA] PIN %d/%d digito=%s", i + 1, len(pin), digito)
-        page.locator(f'button[name="{codigo}"]').click()
-        page.wait_for_timeout(300)
+        
+        try:
+            # Encontramos el botón usando el atributo data-value
+            boton = page.locator(f'button.ui-keyboard-button[data-value="{digito}"]')
+            boton.wait_for(state="visible", timeout=5000)
+            
+            # Obtener las coordenadas EXACTAS del botón en la pantalla
+            caja = boton.bounding_box()
+            if caja:
+                # Calcular el centro exacto del botón
+                centro_x = caja["x"] + (caja["width"] / 2)
+                centro_y = caja["y"] + (caja["height"] / 2)
+                
+                # MOVER el ratón hacia el botón poco a poco (steps=5)
+                # Esto dispara eventos mouseover legítimamente
+                page.mouse.move(centro_x, centro_y, steps=5)
+                page.wait_for_timeout(300)  # Pausa mientras se pone el asterisco
+                
+                # CLIC LENTO: Bajar botón, esperar, soltar botón
+                # Esto hace que isTrusted=true y la velocidad sea humana
+                page.mouse.down()
+                page.wait_for_timeout(200)  # Mantener el clic apretado 200ms
+                page.mouse.up()
+                
+                log.info("[SURA] ✓ Dígito %s digitado (clic lento con mouse.down/up)", digito)
+            else:
+                # Fallback por si la caja no se detecta
+                log.warning("[SURA] No se pudo obtener bounding_box, usando click() simple")
+                boton.hover()
+                page.wait_for_timeout(300)
+                boton.click(delay=200)
+                log.info("[SURA] ✓ Dígito %s digitado (fallback)", digito)
+            
+            # Pausa larga entre números (como alguien buscando la tecla)
+            page.wait_for_timeout(800)
+            
+        except Exception as e:
+            log.error("[SURA] Error digitando dígito %s: %s", digito, str(e))
+            _debug_teclado_virtual(page)
+            raise
 
-    # Aceptar con name="accept" (confirmado por debug)
-    log.info("[SURA] Aceptando PIN con button[name=accept]")
-    page.locator('button[name="accept"]').click()
+    # 4. Botón de Aceptar (✔) - con mismo tratamiento humanizado
+    log.info("[SURA] Confirmando PIN con botón Aceptar...")
+    
+    try:
+        boton_aceptar = page.locator("button.ui-keyboard-accept")
+        boton_aceptar.wait_for(state="visible", timeout=5000)
+        
+        caja_acc = boton_aceptar.bounding_box()
+        if caja_acc:
+            centro_x = caja_acc["x"] + (caja_acc["width"] / 2)
+            centro_y = caja_acc["y"] + (caja_acc["height"] / 2)
+            page.mouse.move(centro_x, centro_y, steps=5)
+            page.wait_for_timeout(300)
+            page.mouse.down()
+            page.wait_for_timeout(200)
+            page.mouse.up()
+            log.info("[SURA] ✓ PIN confirmado (mouse.down/up)")
+        else:
+            boton_aceptar.click(delay=200)
+            log.info("[SURA] ✓ PIN confirmado (fallback click)")
+            
+    except Exception as e:
+        log.warning("[SURA] Error con accept, intentando actionkey[enter]...")
+        try:
+            page.locator(".ui-keyboard-actionkey[name='enter']").click()
+            log.info("[SURA] ✓ PIN confirmado (actionkey[enter])")
+        except Exception as fallback_error:
+            log.error("[SURA] Error confirmando PIN: %s", str(fallback_error))
+            raise
+    
     page.wait_for_timeout(600)
+    log.info("[SURA] Teclado virtual completado exitosamente")
 
 
 def radicar_sura(
