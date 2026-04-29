@@ -62,6 +62,28 @@ def _debug_teclado_virtual(page):
         log.warning("[SURA DEBUG] No se pudo capturar info del teclado: %s", str(e))
 
 
+def _digitar_pin(page, pin: str) -> None:
+    ASCII_PIN = {str(d): str(48 + d) for d in range(10)}
+
+    # Abrir teclado
+    page.locator("#suraPassword").click()
+    page.wait_for_timeout(800)
+
+    # Esperar que el teclado esté listo
+    page.locator('button[name="48"]').wait_for(state="visible", timeout=8000)
+
+    for i, digito in enumerate(pin):
+        codigo = ASCII_PIN[digito]
+        log.info("[SURA] PIN %d/%d digito=%s", i + 1, len(pin), digito)
+        page.locator(f'button[name="{codigo}"]').click()
+        page.wait_for_timeout(300)
+
+    # Aceptar con name="accept" (confirmado por debug)
+    log.info("[SURA] Aceptando PIN con button[name=accept]")
+    page.locator('button[name="accept"]').click()
+    page.wait_for_timeout(600)
+
+
 def radicar_sura(
     tipo_documento: str,
     numero_documento: str,
@@ -144,54 +166,20 @@ def radicar_sura(
 
             # ── PASO 4: PIN ───────────────────────────────────────────────
             log.info("[SURA] PASO 4: Digitando PIN")
-            page.locator("#suraPassword").click()
-            page.wait_for_timeout(600)
+            _digitar_pin(page, clave)
             
-            # Digitar PIN usando teclado virtual aleatorio
-            for digito in clave:
-                log.info("[SURA] Buscando botón del dígito: %s", digito)
-                
-                # Buscar botón que contenga el dígito (flexible para orden aleatorio)
-                # Intenta múltiples selectores para máxima compatibilidad
-                botones_encontrados = page.locator(
-                    f'button:has-text("{digito}"), button[value="{digito}"], button[data-value="{digito}"]'
-                ).all()
-                
-                if not botones_encontrados:
-                    # Si no encuentra con los selectores anteriores, busca usando XPath
-                    botones_encontrados = page.locator(
-                        f'xpath=//button[contains(text(), "{digito}")]'
-                    ).all()
-                
-                if botones_encontrados:
-                    # Verificar que el botón tenga exactamente el dígito (no parte de otro número)
-                    for btn in botones_encontrados:
-                        texto_btn = btn.text_content().strip()
-                        if texto_btn == digito:
-                            log.info("[SURA] ✓ Botón encontrado para dígito %s", digito)
-                            btn.click(timeout=5000)
-                            page.wait_for_timeout(200)
-                            break
-                else:
-                    # FALLO: No se encontró el botón
-                    log.error("[SURA] ✗ No se encontró botón para dígito %s", digito)
-                    _debug_teclado_virtual(page)
-                    raise Exception(
-                        f"No se encontró botón para dígito {digito} en teclado virtual. "
-                        f"Selectors probados: has-text, value, data-value, XPath. "
-                        f"Posible cambio en estructura HTML de SURA. "
-                        f"Ver archivos de debug en: {Path(tempfile.gettempdir()) / 'sura_debug'}"
-                    )
-
-            # Confirmar PIN con botón ✔
-            log.info("[SURA] Confirmando PIN con botón ✔")
-            page.get_by_role("button", name="✔").click(timeout=5000)
-            page.wait_for_timeout(400)
+            # Cerrar teclado virtual presionando Escape
+            log.info("[SURA] Cerrando teclado virtual")
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(800)
 
             # ── PASO 5: Iniciar sesión ────────────────────────────────────
             log.info("[SURA] PASO 5: Iniciando sesión")
-            page.get_by_role("button", name="Iniciar sesión").click()
-
+            
+            # Click en "Iniciar sesión" via JavaScript
+            boton_iniciar = page.get_by_role("button", name="Iniciar sesión")
+            boton_iniciar.evaluate("el => el.click()")
+            
             # Esperar que el SSO redirija al portal (hasta 60 segundos)
             page.wait_for_url("**/Semp/**", timeout=60000)
             page.get_by_role("link", name="Empleadores").wait_for(

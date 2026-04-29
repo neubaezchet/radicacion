@@ -6,7 +6,7 @@ from .base import (
     TIPOS_DOCUMENTO_VALIDOS,
     TIPOS_DOCUMENTO_LABELS,
 )
-from .sura import radicar_en_sura, radicar_sura
+from .sura import radicar_sura
 
 __all__ = [
     "CredencialesEmpleador",
@@ -15,6 +15,5 @@ __all__ = [
     "ResultadoRadicacion",
     "TIPOS_DOCUMENTO_VALIDOS",
     "TIPOS_DOCUMENTO_LABELS",
-    "radicar_en_sura",
     "radicar_sura",
 ]
