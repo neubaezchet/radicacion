@@ -20,7 +20,12 @@ SURA_URL = (
     "&service=epssura"
 )
 
-PDF_DIR = Path(os.getenv("PDF_OUTPUT_DIR", "/tmp/radicaciones"))
+# Directorio para guardar PDFs - usar Temp de Windows si no está configurado
+PDF_OUTPUT_DIR_ENV = os.getenv("PDF_OUTPUT_DIR", "")
+if PDF_OUTPUT_DIR_ENV and PDF_OUTPUT_DIR_ENV != "/tmp/radicaciones":
+    PDF_DIR = Path(PDF_OUTPUT_DIR_ENV)
+else:
+    PDF_DIR = Path(tempfile.gettempdir()) / "sura_pdfs"
 
 # Mapa dígito → código ASCII del botón PIN de SURA
 # 0=48, 1=49, 2=50 ... 9=57
@@ -265,28 +270,28 @@ def radicar_sura(
             )
             log.info("[SURA] PASO 5 OK — portal cargado")
 
-            # ── PASO 6: Hover Empleadores → Empresa ───────────────────────
-            log.info("[SURA] PASO 6: Navegando al menú Empresa")
-            page.get_by_role("link", name="Empleadores").hover()
-            page.wait_for_timeout(800)
-            page.get_by_role("link", name="Empresa").click()
+            # ── PASO 6: Hover en el menú Empleadores ─────────────────────────
+            log.info("[SURA] PASO 6: Desplegando menú Empleadores")
+            page.locator("#liMenuSemp").hover()
             page.wait_for_timeout(500)
-            log.info("[SURA] PASO 6 OK")
+            log.info("[SURA] Menú desplegado")
 
-            # ── PASO 7: Seleccionar empresa ───────────────────────────────
-            log.info("[SURA] PASO 7: Seleccionando empresa")
-            page.locator("#SempTranEmpresa").wait_for(state="visible", timeout=15000)
-            page.locator("#SempTranEmpresa").click()
-            page.wait_for_load_state("networkidle", timeout=15000)
+            # ── PASO 7: Clic en Empresa (inyectado) ───────────────────────
+            log.info("[SURA] PASO 7: Clic en Empresa")
+            empresa_link = page.locator("#SempTranEmpresa")
+            empresa_link.evaluate("el => el.click()")
+            page.wait_for_timeout(1000)
             log.info("[SURA] PASO 7 OK")
 
-            # ── PASO 8: Radicar Incapacidades ─────────────────────────────
-            log.info("[SURA] PASO 8: Click en Radicar Incapacidades")
-            page.get_by_role("link", name="Radicar Incapacidades").wait_for(
-                state="visible", timeout=15000
-            )
-            page.get_by_role("link", name="Radicar Incapacidades").click()
+            # ── PASO 8: Radicar Incapacidades (inyectado) ─────────────────
+            log.info("[SURA] PASO 8: Clic en Radicar Incapacidades")
+            radicar_link = page.locator("a:has-text('Radicar Incapacidades')")
+            radicar_link.evaluate("el => el.click()")
+            
+            # Esperamos a que el sistema se estabilice tras cargar el iframe
             page.wait_for_load_state("networkidle", timeout=15000)
+            page.wait_for_timeout(2000)
+            log.info("[SURA] Formulario cargado en el iframe")
             log.info("[SURA] PASO 8 OK")
 
             # ── PASO 9: Formulario en iframe ──────────────────────────────
@@ -330,15 +335,34 @@ def radicar_sura(
             log.info("[SURA] PASO 9 OK")
 
             # ── PASO 10: Extraer número de radicado ───────────────────────
+            log.info("[SURA] PASO 10: Extrayendo radicado y guardando evidencia")
+            
+            # Screenshot de la confirmación
+            screenshot_dir = Path(tempfile.gettempdir()) / "sura_screenshots"
+            screenshot_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            screenshot_path = screenshot_dir / f"radicacion_{timestamp}.png"
+            page.screenshot(path=str(screenshot_path), full_page=True)
+            log.info("[SURA] Screenshot de confirmación guardado: %s", screenshot_path)
+            
+            # Extraer número de radicado
             radicado = _extraer_radicado(page, frame)
+            log.info("[SURA] Número de radicado extraído: %s", radicado)
+            
+            # Guardar PDF de la confirmación
             pdf_path = _guardar_pdf(page, documento_trabajador, fecha_inicio)
+            if pdf_path:
+                log.info("[SURA] PDF guardado en: %s", pdf_path)
+            else:
+                log.warning("[SURA] No se pudo generar PDF")
 
-            log.info("[SURA] === FIN OK === Radicado: %s", radicado)
+            log.info("[SURA] === FIN OK === Radicado: %s | PDF: %s", radicado, pdf_path)
             return {
                 "exitoso": True,
                 "numero_radicado": radicado,
                 "mensaje": "Radicación exitosa",
                 "pdf_path": pdf_path,
+                "screenshot_path": str(screenshot_path),
             }
 
         except Exception as ex:
@@ -369,14 +393,30 @@ def radicar_sura(
 
 def _extraer_radicado(page, frame) -> str:
     """Busca el número de radicado en el texto de la página."""
-    for fuente in [frame, page]:
+    patrones = [
+        r"[Rr]adicado[:\s#Nº\-]*(\d{6,15})",          # Radicado: 12345
+        r"[Rr]adicación[:\s#Nº\-]*(\d{6,15})",        # Radicación: 12345
+        r"Número.*[Rr]adicado[:\s]*(\d{6,15})",       # Número radicado: 12345
+        r"#(\d{6,15})",                                 # Solo #12345
+        r"(\d{8,15})",                                  # Último número de 8-15 dígitos
+    ]
+    
+    for fuente_label, fuente in [("iframe", frame), ("página", page)]:
         try:
             texto = fuente.locator("body").inner_text(timeout=5000)
-            match = re.search(r"[Rr]adicado[:\s#Nº]*(\d+)", texto)
-            if match:
-                return match.group(1)
-        except Exception:
-            continue
+            log.info("[SURA] Buscando radicado en %s...", fuente_label)
+            
+            for patron in patrones:
+                match = re.search(patron, texto)
+                if match:
+                    radicado = match.group(1)
+                    log.info("[SURA] Radicado encontrado (%s): %s", fuente_label, radicado)
+                    return radicado
+                    
+        except Exception as e:
+            log.debug("[SURA] No se pudo buscar en %s: %s", fuente_label, str(e))
+    
+    log.warning("[SURA] No se encontró número de radicado")
     return "RADICADO_NO_ENCONTRADO"
 
 
@@ -384,12 +424,25 @@ def _guardar_pdf(page, documento_trabajador: str, fecha_inicio: str) -> str | No
     """Guarda la página actual como PDF."""
     try:
         PDF_DIR.mkdir(parents=True, exist_ok=True)
+        
         fecha = fecha_inicio or datetime.now().strftime("%d_%m_%Y")
         cedula = documento_trabajador or "sin_cedula"
         ruta = PDF_DIR / f"{cedula}_{fecha}.pdf"
-        page.pdf(path=str(ruta))
-        return str(ruta)
-    except Exception:
+        
+        # Generar PDF
+        page.pdf(path=str(ruta), format="A4", margin={"top": "1cm", "bottom": "1cm"})
+        
+        if ruta.exists():
+            tamaño = ruta.stat().st_size
+            log.info("[SURA] PDF generado exitosamente: %s (tamaño: %d bytes)", 
+                    ruta, tamaño)
+            return str(ruta)
+        else:
+            log.warning("[SURA] PDF no se creó en: %s", ruta)
+            return None
+            
+    except Exception as e:
+        log.error("[SURA] Error guardando PDF: %s", str(e))
         return None
 
 
