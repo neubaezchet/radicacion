@@ -217,26 +217,21 @@
   <!-- FORMULARIO -->
   <div class="panel-form">
 
-    <div class="section-label">EPS destino</div>
-    <div class="eps-selector">
-      <div class="eps-btn active" data-eps="sura">
-        SURA
-        <div class="eps-badge">● activo</div>
-      </div>
-      <div class="eps-btn disabled">
-        NUEVA EPS
-        <div class="eps-badge">pronto</div>
-      </div>
-      <div class="eps-btn disabled">
-        SANITAS
-        <div class="eps-badge">pronto</div>
-      </div>
+    <!-- SELECTOR EMPRESA -->
+    <div class="section-label">Empresa / Portal</div>
+    <div class="form-group">
+      <label>Selecciona empresa</label>
+      <select id="empresa-selector">
+        <option value="">— Seleccione empresa —</option>
+        <option value="sura">SURA</option>
+        <option value="compensar">COMPENSAR</option>
+      </select>
     </div>
 
     <!-- CREDENCIALES EMPLEADOR -->
     <div class="section-label">Credenciales empleador</div>
 
-    <div class="form-group">
+    <div class="form-group" id="grupo-tipo-doc">
       <label>Tipo de documento empleador</label>
       <select id="tipo_doc_empleador">
         <option value="">— Seleccione —</option>
@@ -268,7 +263,7 @@
       <div class="form-group">
         <label>Clave portal</label>
         <input type="password" id="clave" placeholder="••••••••">
-        <div class="hint">⚠ Se ingresa en teclado virtual</div>
+        <div class="hint" id="hint-clave">⚠ Se ingresa en teclado virtual</div>
       </div>
     </div>
 

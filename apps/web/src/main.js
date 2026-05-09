@@ -6,6 +6,48 @@ function api(path) {
 
 const jobs = {};
 let statTotal = 0, statOk = 0, statFail = 0;
+let currentBot = 'sura';
+
+// ── Bot Configuration ─────────────────────────────────────────────────────
+
+const BOTS_CONFIG = {
+  sura: {
+    label: 'SURA',
+    endpoint: '/api/radicar/sura',
+    docTypes: {
+      A: 'NIT',
+      N: 'NIT PERSONAS NATURALES',
+      C: 'CEDULA',
+      E: 'CEDULA EXTRANJERIA',
+      D: 'DIPLOMATICO',
+      X: 'DOC.IDENT. DE EXTRANJEROS',
+      F: 'IDENT. FISCAL PARA EXT.',
+      U: 'NUIP',
+      P: 'PASAPORTE',
+      R: 'REGISTRO CIVIL',
+      T: 'TARJ.IDENTIDAD',
+      B: 'CERTIFICADO NACIDO VIVO',
+      O: 'PASAPORTE ONU',
+      Q: 'PERMISO ESPECIAL PERMANENCIA',
+      S: 'SALVOCONDUCTO DE PERMANENCIA',
+      G: 'PERMISO ESPECIAL FORMACN PEPFF',
+      M: 'PERMISO POR PROTECCION TEMPORL',
+    },
+    hintClave: '⚠ Se ingresa en teclado virtual',
+  },
+  compensar: {
+    label: 'COMPENSAR',
+    endpoint: '/api/radicar/compensar',
+    docTypes: {
+      ni: 'NIT',
+      cc: 'CEDULA',
+      ce: 'CEDULA EXTRANJERIA',
+      pa: 'PASAPORTE',
+      pe: 'PERMISO ESPECIAL PERMANENCIA',
+    },
+    hintClave: '⚠ Se ingresa en teclado virtual',
+  },
+};
 
 // ── API health ────────────────────────────────────────────────────────────
 
@@ -19,6 +61,29 @@ async function pingAPI() {
     document.getElementById('api-dot').style.background = '#f87171';
     document.getElementById('api-label').textContent = 'api · offline';
   }
+}
+
+// ── Bot Selector ──────────────────────────────────────────────────────────
+
+function updateBotFields(botKey) {
+  currentBot = botKey;
+  const config = BOTS_CONFIG[botKey];
+  if (!config) return;
+
+  // Actualizar selector de tipo de documento
+  const tipoDocSelect = document.getElementById('tipo_doc_empleador');
+  const currentValue = tipoDocSelect.value;
+  tipoDocSelect.innerHTML = '<option value="">— Seleccione —</option>';
+  for (const [code, label] of Object.entries(config.docTypes)) {
+    const opt = document.createElement('option');
+    opt.value = code;
+    opt.textContent = label;
+    if (code === currentValue) opt.selected = true;
+    tipoDocSelect.appendChild(opt);
+  }
+
+  // Actualizar hint de clave
+  document.getElementById('hint-clave').textContent = config.hintClave;
 }
 
 // ── Dates ─────────────────────────────────────────────────────────────────
@@ -73,6 +138,14 @@ function setupToggle() {
 
 async function radicar() {
   const btn = document.getElementById('btn-radicar');
+  const empresaSelector = document.getElementById('empresa-selector');
+  const empresa = empresaSelector.value;
+
+  if (!empresa) {
+    alert('Debe seleccionar una empresa/bot');
+    return;
+  }
+
   const esTranscripcion = document.getElementById('toggle-transcripcion').checked;
 
   const f = {
@@ -129,12 +202,13 @@ async function radicar() {
   btn.textContent = 'ENVIANDO...';
 
   try {
-    const r = await fetch(api('/api/radicar/sura'), { method: 'POST', body: fd });
+    const endpoint = BOTS_CONFIG[empresa].endpoint;
+    const r = await fetch(api(endpoint), { method: 'POST', body: fd });
     let data;
     try { data = await r.json(); } catch { throw new Error(`Respuesta no JSON (${r.status})`); }
     if (!r.ok) throw new Error(data?.detail ?? JSON.stringify(data));
     if (data.job_id) {
-      addLogEntry(data.job_id, f.cedula, `${f.prefijo_incap}-${f.numero_incap}`, esTranscripcion);
+      addLogEntry(data.job_id, f.cedula, `${f.prefijo_incap}-${f.numero_incap}`, esTranscripcion, empresa);
       pollJob(data.job_id);
     }
   } catch (e) {
@@ -147,7 +221,7 @@ async function radicar() {
 
 // ── Log entries ───────────────────────────────────────────────────────────
 
-function addLogEntry(jobId, cedula, numIncap, esTranscripcion) {
+function addLogEntry(jobId, cedula, numIncap, esTranscripcion, bot) {
   document.getElementById('empty-state')?.remove();
   statTotal++;
   document.getElementById('stat-total').textContent = String(statTotal);
@@ -157,6 +231,7 @@ function addLogEntry(jobId, cedula, numIncap, esTranscripcion) {
   const el = document.createElement('div');
   el.className = 'log-entry procesando';
   el.id = `job-${jobId}`;
+  const botLabel = BOTS_CONFIG[bot]?.label || bot.toUpperCase();
   el.innerHTML = `
     <div class="log-status-icon procesando"><div class="spinner"></div></div>
     <div class="log-body">
@@ -164,7 +239,7 @@ function addLogEntry(jobId, cedula, numIncap, esTranscripcion) {
       <div class="log-sub" id="msg-${jobId}">procesando radicación...</div>
     </div>
     <div class="log-badge${esTranscripcion ? ' transcripcion' : ''}">
-      ${esTranscripcion ? 'TRANSCRIPT.' : 'SURA'}
+      ${esTranscripcion ? 'TRANSCRIPT.' : botLabel}
     </div>
   `;
   container.insertBefore(el, container.firstChild);
@@ -222,6 +297,16 @@ function pollJob(jobId) {
 function init() {
   pingAPI();
   setInterval(pingAPI, 15000);
+  
+  // Selector de empresa/bot
+  document.getElementById('empresa-selector').addEventListener('change', (e) => {
+    const bot = e.target.value;
+    if (bot) updateBotFields(bot);
+  });
+  
+  // Inicializar con SURA por defecto
+  updateBotFields('sura');
+  
   document.getElementById('fecha_inicio').addEventListener('change', calcDias);
   document.getElementById('fecha_fin').addEventListener('change', calcDias);
   setupDrop('drop-incap', 'pdf_incap', 'drop-incap-text');
