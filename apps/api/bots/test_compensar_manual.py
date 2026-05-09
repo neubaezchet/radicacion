@@ -3,15 +3,17 @@
 Test interactivo para el bot de Compensar.
 
 Permite probar el bot localmente CON UN NAVEGADOR VISIBLE,
-ideal para debugging de selectores.
+ideal para debugging de selectores y ver el paso a paso en tiempo real.
 
 Uso:
     python test_compensar_manual.py
 
 El navegador se abrirá SIN headless (verás la pantalla en tiempo real).
+Perfecto para ver en vivo cada paso del bot y detectar dónde falla.
 """
 
 import sys
+import os
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -27,55 +29,107 @@ def test_compensar_manual():
     """Prueba el bot con un navegador VISIBLE."""
     
     print("=" * 80)
-    print("🧪 TEST MANUAL - Bot Compensar")
+    print("🧪 TEST MANUAL - Bot Compensar (NAVEGADOR VISIBLE)")
     print("=" * 80)
     print()
     
-    print("Este test abrirá un navegador VISIBLE para que puedas ver qué pasa.")
+    print("Este test abrirá un navegador VISIBLE para que veas el paso a paso.")
+    print("Podrás ver exactamente dónde falla el bot.")
     print()
     
-    print("📋 Datos de prueba que usaremos:")
+    print("TIPOS DE DOCUMENTO ACEPTADOS EN COMPENSAR:")
+    print("  • ni  → NIT")
+    print("  • cc  → CEDULA")
+    print("  • ce  → CEDULA EXTRANJERIA")
+    print("  • pa  → PASAPORTE")
+    print("  • pe  → PERMISO ESPECIAL PERMANENCIA")
     print()
     
-    # Datos de prueba
-    nit = input("  NIT/Documento empleador [860007234]: ").strip() or "860007234"
-    clave = input("  Contraseña: ").strip()
+    print("=" * 80)
+    print("INGRESA LOS DATOS DE LA EMPRESA (Portal Compensar)")
+    print("=" * 80)
+    print()
     
-    if not clave:
-        print("❌ Error: La contraseña es requerida")
-        return
+    # Datos de Compensar (del portal)
+    tipo_doc = input("  Tipo de documento [ni]: ").strip().lower() or "ni"
+    numero_doc = input("  Número de documento [860000452]: ").strip() or "860000452"
+    clave = input("  Contraseña [Eliot2025.]: ").strip() or "Eliot2025."
+    
+    print()
+    print("=" * 80)
+    print("INGRESA LOS DATOS DEL TRABAJADOR")
+    print("=" * 80)
+    print()
     
     cedula = input("  Cédula del trabajador [12345678]: ").strip() or "12345678"
-    fecha = input("  Fecha inicio (DD MM YYYY) [18 04 2026]: ").strip() or "18 04 2026"
-    incapacidad = input("  Número de incapacidad [12345]: ").strip() or "12345"
+    prefijo_incap = input("  Prefijo del número de incapacidad [0]: ").strip() or "0"
+    numero_incap = input("  Número de incapacidad [67372855]: ").strip() or "67372855"
     
     print()
-    print("✅ Datos configurados:")
-    print(f"  • NIT: {nit}")
-    print(f"  • Cédula: {cedula}")
-    print(f"  • Fecha: {fecha}")
-    print(f"  • Incapacidad: {incapacidad}")
+    print("=" * 80)
+    print("¿REQUIERE TRANSCRIPCIÓN? (Si la incapacidad NO es de Compensar)")
+    print("=" * 80)
+    print()
+    
+    transcripcion_str = input("  ¿Usar transcripción? (s/n) [n]: ").strip().lower()
+    transcripcion = transcripcion_str == 's'
+    
+    print()
+    print("✅ DATOS CONFIGURADOS:")
+    print()
+    print("  EMPRESA:")
+    print(f"    • Tipo documento: {tipo_doc}")
+    print(f"    • Número: {numero_doc}")
+    print(f"    • Contraseña: {'*' * len(clave)}")
+    print()
+    print("  TRABAJADOR:")
+    print(f"    • Cédula: {cedula}")
+    print(f"    • Prefijo incapacidad: {prefijo_incap}")
+    print(f"    • Número incapacidad: {numero_incap}")
+    print(f"    • Transcripción: {'SÍ' if transcripcion else 'NO'}")
     print()
     
     # Crear datos para el bot
     datos = DatosRadicacion(
         credenciales=CredencialesEmpleador(
-            tipo_documento="A",  # NIT
-            numero_documento=nit,
+            tipo_documento=tipo_doc,
+            numero_documento=numero_doc,
             clave=clave,
         ),
         documento_trabajador=cedula,
-        fecha_inicio_incapacidad=fecha,
-        prefijo_incapacidad="0",
-        numero_incapacidad=incapacidad,
+        prefijo_incapacidad=prefijo_incap,
+        numero_incapacidad=numero_incap,
+        transcripcion=transcripcion,
     )
     
-    print("🚀 Iniciando bot Compensar...")
+    print("=" * 80)
+    print("🚀 INICIANDO BOT COMPENSAR")
+    print("=" * 80)
     print()
-    print("El navegador se abrirá en modo VISIBLE.")
-    print("Si hay errores, los verás en la pantalla y en la consola aquí.")
+    print("El navegador se abrirá AHORA en modo VISIBLE.")
+    print("Verás cada paso del bot en tiempo real.")
+    print()
+    print("✨ PASOS QUE VERÁS:")
+    print("  1. Login en Compensar")
+    print("  2. Navegar a 'Transacciones en Línea'")
+    print("  3. Click en 'Salud'")
+    print("  4. Buscar 'Incapacidades'")
+    print("  5. Click en 'Radicar'")
+    print("  6. Saltar paso si existe")
+    print("  7. Seleccionar Incapacidad")
+    print("  8. Buscar incapacidad por número")
+    print("  9. Cargar incapacidad")
+    if transcripcion:
+        print(" 10. Adjuntar documento PDF")
+        print(" 11. Radicar")
+    else:
+        print(" 10. Radicar")
     print()
     print("-" * 80)
+    
+    # Activar modo visible para debugging
+    os.environ["PLAYWRIGHT_HEADLESS"] = "0"
+    
     print()
     
     try:
@@ -84,86 +138,89 @@ def test_compensar_manual():
         print()
         print("-" * 80)
         print()
-        print("✅ Bot completó la ejecución")
+        print("✅ BOT COMPLETÓ LA EJECUCIÓN")
         print()
-        print(f"   Exitoso: {resultado.exitoso}")
-        print(f"   Número radicado: {resultado.numero_radicado}")
-        print(f"   Mensaje: {resultado.mensaje}")
-        print(f"   Screenshots: {resultado.pdf_path}")
+        print(f"  📊 Exitoso: {'SÍ ✓' if resultado.exitoso else 'NO ✗'}")
+        print(f"  📝 Número radicado: {resultado.numero_radicado or '(no obtenido)'}")
+        print(f"  💬 Mensaje: {resultado.mensaje}")
+        print(f"  📸 Evidencia (screenshots): {resultado.pdf_path}")
         print()
         
         if resultado.exitoso:
-            print("🎉 ¡ÉXITO! La incapacidad fue radicada.")
+            print("=" * 80)
+            print("🎉 ¡ÉXITO! LA INCAPACIDAD FUE RADICADA EXITOSAMENTE")
+            print("=" * 80)
             print()
-            print("Comprueba:")
-            print(f"  - Número radicado en portal: {resultado.numero_radicado}")
-            print(f"  - Screenshots en: {resultado.pdf_path}")
+            print(f"  ✓ Número de radicación: {resultado.numero_radicado}")
+            print(f"  ✓ Verifica en el portal Compensar")
+            print(f"  ✓ Screenshots guardados en: {resultado.pdf_path}")
+            print()
         else:
-            print("⚠️ El bot completó pero reporta que NO fue exitoso.")
+            print("=" * 80)
+            print("⚠️  EL BOT COMPLETÓ PERO NO FUE EXITOSO")
+            print("=" * 80)
             print()
-            print("Revisa:")
-            print(f"  - El mensaje: {resultado.mensaje}")
-            print(f"  - Los screenshots: {resultado.pdf_path}")
+            print(f"  Mensaje de error: {resultado.mensaje}")
+            print(f"  Mira los screenshots para ver dónde falló: {resultado.pdf_path}")
             print()
-            print("Posibles causas:")
-            print("  1. Selectores incorrectos (elemento no encontrado)")
-            print("  2. Datos inválidos para el portal")
-            print("  3. Portal requiere validaciones extras (2FA, CAPTCHA)")
-            print("  4. Error en extracción del número radicado")
+            print("POSIBLES CAUSAS:")
+            print("  ❌ Selectores incorrectos (elemento no encontrado)")
+            print("  ❌ Datos inválidos para el portal")
+            print("  ❌ Portal requiere validaciones extras (2FA, CAPTCHA)")
+            print("  ❌ Error al extraer el número radicado")
+            print("  ❌ Datos de credenciales incorrectos")
+            print()
             
     except Exception as e:
         print()
         print("-" * 80)
         print()
-        print(f"❌ Error: {type(e).__name__}")
-        print(f"   {str(e)}")
+        print("=" * 80)
+        print("❌ ERROR DURANTE LA EJECUCIÓN DEL BOT")
+        print("=" * 80)
+        print()
+        print(f"  Tipo de error: {type(e).__name__}")
+        print(f"  Mensaje: {str(e)}")
         print()
         
         import traceback
-        print("Traceback completo:")
+        print("TRACEBACK COMPLETO:")
         print("-" * 80)
         traceback.print_exc()
         print("-" * 80)
         print()
         
-        print("Próximos pasos:")
-        print("  1. Verifica el selector que falló en el error anterior")
-        print("  2. Abre compensar_recorded.py para ver el código grabado")
-        print("  3. Compara selectores en el código grabado vs compensar.py")
-        print("  4. Actualiza los selectores en compensar.py")
+        print("PRÓXIMOS PASOS PARA DEBUGGING:")
+        print("  1. Identifica el selector que falló en el error")
+        print("  2. Abre compensar.py y revisa ese selector")
+        print("  3. Compara con el código del Playwright codegen original")
+        print("  4. Actualiza el selector si es necesario")
         print("  5. Ejecuta este test nuevamente")
         print()
-
-
-def test_compensar_headless():
-    """Prueba el bot en modo headless (sin navegador visible)."""
-    
-    print("=" * 80)
-    print("🧪 TEST HEADLESS - Bot Compensar (sin navegador visible)")
-    print("=" * 80)
-    print()
-    
-    # Este sería para CI/CD, por ahora no lo implementamos
-    print("⏭️ Modo headless no implementado aún.")
-    print("Usa test_compensar_manual() para debugging interactivo.")
+        print("💡 TIP: Ejecuta en navegador visible (+SLOW) para ver dónde falla")
+        print()
 
 
 if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(
-        description="Test del bot Compensar"
+        description="Test interactivo del bot Compensar",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+EJEMPLOS:
+  python test_compensar_manual.py                    # Modo interactivo
+  python test_compensar_manual.py --mode manual      # Modo manual (por defecto)
+        """
     )
     parser.add_argument(
         "--mode",
-        choices=["manual", "headless"],
+        choices=["manual"],
         default="manual",
-        help="Modo de test: manual (navegador visible) o headless"
+        help="Modo de test (manual con navegador visible)"
     )
     
     args = parser.parse_args()
     
     if args.mode == "manual":
         test_compensar_manual()
-    else:
-        test_compensar_headless()

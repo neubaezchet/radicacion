@@ -1,4 +1,4 @@
-const API_BASE = (import.meta.env.VITE_RADICACION_API_URL || '').replace(/\/$/, '');
+const API_BASE = 'http://127.0.0.1:8000';
 
 function api(path) {
   return `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;

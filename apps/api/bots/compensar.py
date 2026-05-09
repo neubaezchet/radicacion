@@ -97,6 +97,38 @@ def radicar_en_compensar(datos: 'DatosRadicacion') -> 'ResultadoRadicacion':
         log.info("[COMPENSAR] Navegando a: %s", COMPENSAR_LOGIN_URL)
         page.goto(COMPENSAR_LOGIN_URL, wait_until="networkidle")
         
+        # Manejar diálogo de detección de bot
+        try:
+            log.info("[COMPENSAR] Buscando diálogo de bot detection...")
+            
+            # Buscamos específicamente el botón con el texto 'Entiendo' (o 'Entendido' por si acaso cambia)
+            # También usamos type="submit" para ser más precisos con el HTML del portal
+            btn_entiendo = page.locator('button[type="submit"]:has-text("Entiendo"), button:has-text("Entendido")').first
+            
+            if btn_entiendo.is_visible(timeout=5000):
+                log.info("[COMPENSAR] Encontrado diálogo 'Entiendo' - clickeando...")
+                btn_entiendo.click()
+                
+                # Le damos un respiro al navegador para que cierre el modal animado
+                page.wait_for_timeout(1000) 
+                page.wait_for_load_state("networkidle", timeout=10000)
+            else:
+                log.info("[COMPENSAR] No fue necesario clickear 'Entiendo', no apareció.")
+                
+        except Exception as e:
+            log.debug("[COMPENSAR] No se encontró diálogo Entiendo: %s", e)
+        
+        # Cerrar anuncios/popups
+        try:
+            log.info("[COMPENSAR] Buscando anuncios para cerrar...")
+            close_btn = page.locator("button[aria-label='Close'], button[aria-label='close'], .close-btn, [class*='close']").first
+            if close_btn.is_visible(timeout=3000):
+                log.info("[COMPENSAR] Encontrado anuncio - clickeando X...")
+                close_btn.click()
+                page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception as e:
+            log.debug("[COMPENSAR] No se encontró anuncio: %s", e)
+        
         # Screenshot 1: Login inicial
         ss1 = EVIDENCIA_DIR / f"01_login_{timestamp}.png"
         page.screenshot(path=str(ss1), full_page=True)
